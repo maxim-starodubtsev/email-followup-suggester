@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Follow-up Suggester</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            color: #0078d4;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            color: #666;
+            margin: 0;
+        }
+
+        .controls {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .control-group select,
+        .control-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .control-group input[type="checkbox"] {
+            width: auto;
+            margin-right: 8px;
+        }
+
+        .button {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .button:hover {
+            background-color: #106ebe;
+        }
+
+        .button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .loading-message {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            display: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .email-list {
+            display: none;
+        }
+
+        .email-item {
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+            padding: 15px;
+        }
+
+        .email-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .priority-badge,
+        .account-badge,
+        .llm-indicator {
+            margin-right: 10px;
+            font-size: 12px;
+        }
+
+        .email-subject {
+            font-weight: 600;
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .email-recipient,
+        .email-date,
+        .email-days {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+
+        .email-summary {
+            margin: 10px 0;
+            color: #555;
+            line-height: 1.4;
+        }
+
+        .llm-suggestion {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 14px;
+            border-left: 3px solid #2196f3;
+        }
+
+        .email-actions {
+            margin-top: 15px;
+        }
+
+        .action-button {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 8px;
+            margin-bottom: 5px;
+        }
+
+        .action-button:hover {
+            background: #e2e6ea;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 0;
+            border-radius: 6px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #333;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-footer {
+            padding: 15px 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .settings-section {
+            margin-bottom: 20px;
+        }
+
+        .settings-section h4 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        /* Advanced Filtering */
+        .advanced-filters {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .advanced-filters.show {
+            display: block;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+
+        .filter-row select,
+        .filter-row input {
+            flex: 1;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .toggle-filters {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        /* Statistics Dashboard */
+        .stats-dashboard {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .stats-dashboard.show {
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #0078d4;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* Thread View */
+        .thread-modal {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .thread-modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 6px;
+            width: 95%;
+            max-width: 800px;
+            height: 80%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .thread-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .thread-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .thread-message {
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .thread-message-header {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            border-bottom: 1px solid #dee2e6;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .thread-message-body {
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        /* Progressive Loading */
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #f0f0f0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #0078d4;
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .loading-step {
+            text-align: center;
+            padding: 10px;
+            color: #666;
+            font-size: 12px;
+        }
+
+        /* Enhanced Email Cards */
+        .email-item.priority-high {
+            border-left: 4px solid #d13438;
+        }
+
+        .email-item.priority-medium {
+            border-left: 4px solid #ff8c00;
+        }
+
+        .email-item.priority-low {
+            border-left: 4px solid #107c10;
+        }
+
+        .email-metadata {
+            display: flex;
+            gap: 15px;
+            margin: 10px 0;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .metadata-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .confidence-meter {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+        }
+
+        .confidence-bar {
+            width: 50px;
+            height: 8px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(to right, #d13438, #ff8c00, #107c10);
+            border-radius: 4px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 480px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .filter-row {
+                flex-direction: column;
+                gap: 5px;
+            }
+            
+            .thread-modal-content {
+                width: 98%;
+                height: 90%;
+                margin: 2% auto;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>📧 Follow-up Suggester</h1>
+        <p>AI-powered email follow-up analysis for Outlook</p>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <!-- Statistics Dashboard -->
+    <div id="statsDashboard" class="stats-dashboard">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalEmailsAnalyzed">0</div>
+                <div class="stat-label">Emails Analyzed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="needingFollowup">0</div>
+                <div class="stat-label">Need Follow-up</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="highPriorityCount">0</div>
+                <div class="stat-label">High Priority</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgResponseTime">0</div>
+                <div class="stat-label">Avg Days</div>
+            </div>
+        </div>
+        <button id="toggleStats" class="toggle-filters">Hide Statistics</button>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="emailCount">Number of emails to analyze:</label>
+            <select id="emailCount">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="daysBack">Days to look back:</label>
+            <select id="daysBack">
+                <option value="7" selected>7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="accountFilter">Filter by accounts:</label>
+            <select id="accountFilter" multiple>
+                <!-- Account options will be populated dynamically -->
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="enableLlmSummary"> Use AI for email summaries
+            </label>
+        </div>
+        
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="enableLlmSuggestions"> Use AI for follow-up suggestions
+            </label>
+        </div>
+        
+        <button id="analyzeButton" class="button">Analyze Emails</button>
+        <button id="refreshButton" class="button">Refresh</button>
+        <button id="settingsButton" class="button" style="background-color: #6c757d;">Settings</button>
+        <button id="showStatsButton" class="toggle-filters">Show Statistics</button>
+        <button id="toggleAdvancedFilters" class="toggle-filters">Advanced Filters</button>
+    </div>
+
+    <!-- Advanced Filters -->
+    <div id="advancedFilters" class="advanced-filters">
+        <div class="filter-row">
+            <select id="priorityFilter">
+                <option value="">All Priorities</option>
+                <option value="high">High Priority</option>
+                <option value="medium">Medium Priority</option>
+                <option value="low">Low Priority</option>
+            </select>
+            <select id="responseTimeFilter">
+                <option value="">All Response Times</option>
+                <option value="1-3">1-3 days</option>
+                <option value="4-7">4-7 days</option>
+                <option value="8-14">8-14 days</option>
+                <option value="15+">15+ days</option>
+            </select>
+        </div>
+        <div class="filter-row">
+            <input type="text" id="subjectFilter" placeholder="Filter by subject...">
+            <input type="text" id="senderFilter" placeholder="Filter by sender...">
+        </div>
+        <div class="filter-row">
+            <select id="aiSuggestionFilter">
+                <option value="">All Emails</option>
+                <option value="with-ai">With AI Suggestions</option>
+                <option value="without-ai">Without AI</option>
+            </select>
+            <button id="clearFilters" class="action-button">Clear Filters</button>
+        </div>
+    </div>
+
+    <!-- Progressive Loading -->
+    <div class="loading-message" id="loadingMessage">
+        <div>🔄 <span id="loadingStep">Analyzing your emails...</span></div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="loading-step" id="loadingDetail">This may take a few moments</div>
+    </div>
+
+    <div class="empty-state" id="emptyState">
+        <h3>Ready to analyze your emails!</h3>
+        <p>Click "Analyze Emails" to find messages that might need follow-up.</p>
+    </div>
+
+    <div id="emailList" class="email-list" style="display: none;">
+        <!-- Enhanced email items will be populated here -->
+    </div>
+
+    <!-- Snooze Modal -->
+    <div id="snoozeModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Snooze Email</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="control-group">
+                    <label for="snoozeOptions">Snooze until:</label>
+                    <select id="snoozeOptions">
+                        <!-- Options will be populated from configuration -->
+                    </select>
+                </div>
+                <div class="control-group" id="customSnoozeGroup" style="display: none;">
+                    <label for="customSnoozeDate">Custom date and time:</label>
+                    <input type="datetime-local" id="customSnoozeDate">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="confirmSnooze" class="button">Snooze</button>
+                <button id="cancelSnooze" class="button" style="background-color: #6c757d;">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h4>AI Integration</h4>
+                    <div class="control-group">
+                        <label for="llmEndpoint">LLM API Endpoint:</label>
+                        <input type="text" id="llmEndpoint" placeholder="https://ai-proxy.lab.epam.com" value="https://ai-proxy.lab.epam.com">
+                    </div>
+                    <div class="control-group">
+                        <label for="llmApiKey">API Key:</label>
+                        <input type="password" id="llmApiKey" placeholder="Enter your API key" value="dial-qjboupii21tb26eakd3ytcsb9po">
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Display Options</h4>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="showSnoozedEmails"> Show snoozed emails
+                        </label>
+                    </div>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="showDismissedEmails"> Show dismissed emails
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="saveSettings" class="button">Save Settings</button>
+                <button id="cancelSettings" class="button" style="background-color: #6c757d;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Thread View Modal -->
+    <div id="threadModal" class="thread-modal">
+        <div class="thread-modal-content">
+            <div class="thread-header">
+                <h3 id="threadSubject">Email Thread</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="thread-body" id="threadBody">
+                <!-- Thread messages will be populated here -->
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
