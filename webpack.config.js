@@ -31,7 +31,13 @@ module.exports = (env, options) => {
           test: /\.ts$/,
           exclude: /node_modules/,
           use: {
-            loader: 'ts-loader'
+            loader: 'ts-loader',
+            options: {
+              compilerOptions: {
+                declaration: true,
+                declarationMap: true
+              }
+            }
           }
         },
         {
