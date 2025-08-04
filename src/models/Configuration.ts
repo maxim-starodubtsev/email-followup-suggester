@@ -8,13 +8,17 @@ export interface Configuration {
         medium: number;
         low: number;
     };
-    // New properties for enhanced functionality
+    // Enhanced functionality
     snoozeOptions: SnoozeOption[];
+    // LLM Service Configuration
     enableLlmSummary: boolean;
     enableLlmSuggestions: boolean;
-    llmApiEndpoint?: string;
-    llmApiKey?: string;
-    llmModel?: string;
+    llmProvider?: 'azure' | 'dial' | 'openai'; // API provider type (default: 'dial')
+    llmApiEndpoint?: string; // Base URL for API calls (default: 'http://localhost:8080' for DIAL)
+    llmApiKey?: string; // API key for authentication
+    llmModel?: string; // Model name (default: 'gpt-4o-mini' for DIAL)
+    llmApiVersion?: string; // For Azure OpenAI API version (default: '2024-02-01')
+    llmDeploymentName?: string; // For Azure OpenAI deployment name
     selectedAccounts: string[]; // email addresses of accounts to analyze
     showSnoozedEmails: boolean;
     showDismissedEmails: boolean;

@@ -36,6 +36,13 @@ export class ConfigurationService {
         ],
         enableLlmSummary: false,
         enableLlmSuggestions: false,
+        // DIAL API default configuration
+        llmProvider: 'dial',
+        llmApiEndpoint: 'https://ai-proxy.lab.epam.com',
+        llmModel: 'gpt-4.1-2025-04-14',
+        llmApiKey: 'dial-qjboupii21tb26eakd3ytcsb9po',
+        llmApiVersion: '2025-04-14',
+        llmDeploymentName: 'gpt-4.1-2025-04-14',
         selectedAccounts: [],
         showSnoozedEmails: false,
         showDismissedEmails: false
@@ -183,6 +190,87 @@ export class ConfigurationService {
         config.enableLlmSummary = enableSummary;
         config.enableLlmSuggestions = enableSuggestions;
         await this.saveConfiguration(config);
+    }
+
+    /**
+     * Configure DIAL API with default settings
+     * @param apiEndpoint - DIAL API endpoint (default: 'https://ai-proxy.lab.epam.com')
+     * @param apiKey - API key for authentication
+     * @param model - Model name (default: 'gpt-4.1-2025-04-14')
+     * @param deploymentName - Deployment name (default: same as model)
+     * @param apiVersion - API version (default: '2025-04-14')
+     */
+    public async setupDialApi(apiEndpoint?: string, apiKey?: string, model?: string, deploymentName?: string, apiVersion?: string): Promise<void> {
+        const config = await this.getConfiguration();
+        const defaultModel = 'gpt-4.1-2025-04-14';
+        
+        config.llmProvider = 'dial';
+        config.llmApiEndpoint = apiEndpoint || 'https://ai-proxy.lab.epam.com';
+        config.llmApiKey = apiKey || '';
+        config.llmModel = model || defaultModel;
+        config.llmDeploymentName = deploymentName || model || defaultModel; // Use model as deployment name if not specified
+        config.llmApiVersion = apiVersion || '2025-04-14';
+        await this.saveConfiguration(config);
+    }
+
+    /**
+     * Configure Azure OpenAI API
+     * @param apiEndpoint - Azure OpenAI resource endpoint
+     * @param apiKey - Azure OpenAI API key
+     * @param deploymentName - Azure deployment name
+     * @param apiVersion - API version (default: '2024-02-01')
+     * @param model - Model name
+     */
+    public async setupAzureOpenAi(apiEndpoint: string, apiKey: string, deploymentName: string, apiVersion?: string, model?: string): Promise<void> {
+        const config = await this.getConfiguration();
+        config.llmProvider = 'azure';
+        config.llmApiEndpoint = apiEndpoint;
+        config.llmApiKey = apiKey;
+        config.llmDeploymentName = deploymentName;
+        config.llmApiVersion = apiVersion || '2024-02-01';
+        config.llmModel = model || deploymentName;
+        await this.saveConfiguration(config);
+    }
+
+    /**
+     * Configure OpenAI API
+     * @param apiKey - OpenAI API key
+     * @param model - Model name (default: 'gpt-4')
+     * @param apiEndpoint - API endpoint (default: 'https://api.openai.com')
+     */
+    public async setupOpenAi(apiKey: string, model?: string, apiEndpoint?: string): Promise<void> {
+        const config = await this.getConfiguration();
+        config.llmProvider = 'openai';
+        config.llmApiEndpoint = apiEndpoint || 'https://api.openai.com';
+        config.llmApiKey = apiKey;
+        config.llmModel = model || 'gpt-4';
+        config.llmApiVersion = ''; // Not used for OpenAI
+        config.llmDeploymentName = ''; // Not used for OpenAI
+        await this.saveConfiguration(config);
+    }
+
+    /**
+     * Get current LLM configuration
+     */
+    public async getLlmConfiguration(): Promise<{
+        provider: string;
+        endpoint: string;
+        apiKey: string;
+        model: string;
+        apiVersion?: string;
+        deploymentName?: string;
+        isConfigured: boolean;
+    }> {
+        const config = await this.getConfiguration();
+        return {
+            provider: config.llmProvider || 'dial',
+            endpoint: config.llmApiEndpoint || 'http://localhost:8080',
+            apiKey: config.llmApiKey || '',
+            model: config.llmModel || 'gpt-4o-mini',
+            apiVersion: config.llmApiVersion,
+            deploymentName: config.llmDeploymentName,
+            isConfigured: !!(config.llmApiEndpoint && config.llmApiKey)
+        };
     }
 
     /**

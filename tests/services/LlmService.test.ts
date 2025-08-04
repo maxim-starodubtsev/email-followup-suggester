@@ -15,7 +15,7 @@ describe('LlmService', () => {
     mockFetch = fetch as jest.MockedFunction<typeof fetch>;
     mockFetch.mockClear();
     
-    // Mock configuration
+    // Mock configuration for DIAL API
     mockConfiguration = {
       emailCount: 10,
       daysBack: 7,
@@ -23,9 +23,12 @@ describe('LlmService', () => {
       snoozeOptions: [],
       enableLlmSummary: true,
       enableLlmSuggestions: true,
-      llmApiEndpoint: 'https://ai-proxy.lab.epam.com/openai/chat/completions',
+      llmProvider: 'dial' as const,
+      llmApiEndpoint: 'https://ai-proxy.lab.epam.com',
       llmApiKey: 'test-api-key',
       llmModel: 'gpt-35-turbo',
+      llmDeploymentName: 'gpt-35-turbo',
+      llmApiVersion: '2024-02-01',
       selectedAccounts: [],
       showSnoozedEmails: false,
       showDismissedEmails: false
@@ -97,7 +100,7 @@ describe('LlmService', () => {
       await service.generateFollowupSuggestions('Test email', 'Important context');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://ai-proxy.lab.epam.com/openai/chat/completions',
+        'https://ai-proxy.lab.epam.com/openai/deployments/gpt-35-turbo/chat/completions?api-version=2024-02-01',
         expect.objectContaining({
           body: expect.stringContaining('Important context')
         })
@@ -252,7 +255,7 @@ describe('LlmService', () => {
       await service.generateFollowupSuggestions('Test');
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://ai-proxy.lab.epam.com/openai/chat/completions',
+        'https://ai-proxy.lab.epam.com/openai/deployments/gpt-35-turbo/chat/completions?api-version=2024-02-01',
         expect.objectContaining({
           method: 'POST',
           headers: {
@@ -267,7 +270,10 @@ describe('LlmService', () => {
       // Update configuration to use Azure endpoint
       const azureConfig = {
         ...mockConfiguration,
-        llmApiEndpoint: 'https://myazure.openai.azure.com'
+        llmProvider: 'azure' as const,
+        llmApiEndpoint: 'https://myazure.openai.azure.com',
+        llmDeploymentName: 'gpt-35-turbo',
+        llmApiVersion: '2023-12-01-preview'
       };
       
       const azureService = new LlmService(azureConfig, mockRetryService);
@@ -287,7 +293,7 @@ describe('LlmService', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer test-api-key'
+            'api-key': 'test-api-key'
           }
         })
       );

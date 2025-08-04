@@ -163,10 +163,12 @@ Just return the classification word, nothing else.`;
             headers['Api-Key'] = this.configuration.llmApiKey;
         }
 
-        // Use the endpoint URL directly if it already contains the completions path
-        const apiUrl = this.configuration.llmApiEndpoint!.includes('/openai/chat/completions') 
-            ? this.configuration.llmApiEndpoint!
-            : `${this.configuration.llmApiEndpoint}/openai/chat/completions`;
+        // Build DIAL API URL in the format: {endpoint}/openai/deployments/{deploymentName}/chat/completions?api-version={apiVersion}
+        const deploymentName = this.configuration.llmDeploymentName || this.configuration.llmModel || 'gpt-35-turbo';
+        const apiVersion = this.configuration.llmApiVersion || '2024-02-01';
+        const baseEndpoint = this.configuration.llmApiEndpoint!.replace(/\/$/, ''); // Remove trailing slash
+        
+        const apiUrl = `${baseEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
 
         const response = await fetch(apiUrl, {
             method: 'POST',
@@ -197,19 +199,7 @@ Just return the classification word, nothing else.`;
         };
     }
 
-    private async makeApiCall(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
-        // Check if API endpoint is configured
-        if (!this.configuration.llmApiEndpoint) {
-            throw new Error('LLM API endpoint is not configured');
-        }
-
-        // Use DIAL API if the endpoint contains the DIAL pattern
-        if (this.configuration.llmApiEndpoint.includes('ai-proxy.lab.epam.com') || 
-            this.configuration.llmApiEndpoint.includes('/openai/chat/completions')) {
-            return this.callDialAPI(prompt, options);
-        }
-
-        // Fallback to Azure OpenAI format
+    private async callAzureOpenAI(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
         const requestBody = {
             messages: [
                 { role: 'user', content: prompt }
@@ -221,12 +211,17 @@ Just return the classification word, nothing else.`;
             presence_penalty: options.presencePenalty ?? 0
         };
 
-        const model = this.configuration.llmModel || 'gpt-35-turbo';
-        const response = await fetch(`${this.configuration.llmApiEndpoint}/openai/deployments/${model}/chat/completions?api-version=2023-12-01-preview`, {
+        // Use deployment name or fallback to model name
+        const deploymentName = this.configuration.llmDeploymentName || this.configuration.llmModel || 'gpt-35-turbo';
+        const apiVersion = this.configuration.llmApiVersion || '2023-12-01-preview';
+        
+        const apiUrl = `${this.configuration.llmApiEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=${apiVersion}`;
+
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.configuration.llmApiKey}`
+                'api-key': this.configuration.llmApiKey!
             },
             body: JSON.stringify(requestBody)
         });
@@ -252,6 +247,96 @@ Just return the classification word, nothing else.`;
             model: data.model,
             finishReason: data.choices[0].finish_reason
         };
+    }
+
+    private async callOpenAI(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
+        const requestBody = {
+            model: this.configuration.llmModel || 'gpt-3.5-turbo',
+            messages: [
+                { role: 'user', content: prompt }
+            ],
+            temperature: options.temperature ?? 0.7,
+            max_tokens: options.maxTokens ?? 500,
+            top_p: options.topP ?? 1.0,
+            frequency_penalty: options.frequencyPenalty ?? 0,
+            presence_penalty: options.presencePenalty ?? 0
+        };
+
+        const apiUrl = this.configuration.llmApiEndpoint!.includes('/chat/completions')
+            ? this.configuration.llmApiEndpoint!
+            : `${this.configuration.llmApiEndpoint}/v1/chat/completions`;
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.configuration.llmApiKey}`
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.choices || data.choices.length === 0) {
+            throw new Error('No response choices returned from OpenAI API');
+        }
+
+        return {
+            content: data.choices[0].message.content,
+            usage: data.usage ? {
+                promptTokens: data.usage.prompt_tokens,
+                completionTokens: data.usage.completion_tokens,
+                totalTokens: data.usage.total_tokens
+            } : undefined,
+            model: data.model,
+            finishReason: data.choices[0].finish_reason
+        };
+    }
+
+    private async makeApiCall(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
+        // Check if API endpoint is configured
+        if (!this.configuration.llmApiEndpoint) {
+            throw new Error('LLM API endpoint is not configured');
+        }
+
+        // Determine provider type
+        const provider = this.configuration.llmProvider || this.detectProvider();
+
+        switch (provider) {
+            case 'dial':
+                return this.callDialAPI(prompt, options);
+            case 'azure':
+                return this.callAzureOpenAI(prompt, options);
+            case 'openai':
+                return this.callOpenAI(prompt, options);
+            default:
+                // Fallback to auto-detection
+                if (this.configuration.llmApiEndpoint.includes('ai-proxy.lab.epam.com') || 
+                    this.configuration.llmApiEndpoint.includes('/openai/deployments/')) {
+                    return this.callDialAPI(prompt, options);
+                } else if (this.configuration.llmApiEndpoint.includes('openai.azure.com')) {
+                    return this.callAzureOpenAI(prompt, options);
+                } else {
+                    return this.callOpenAI(prompt, options);
+                }
+        }
+    }
+
+    private detectProvider(): 'azure' | 'dial' | 'openai' {
+        const endpoint = this.configuration.llmApiEndpoint!;
+        
+        if (endpoint.includes('ai-proxy.lab.epam.com') || endpoint.includes('/openai/deployments/')) {
+            return 'dial';
+        } else if (endpoint.includes('openai.azure.com')) {
+            return 'azure';
+        } else {
+            return 'openai';
+        }
     }
 
     private buildFollowupPrompt(emailContent: string, context?: string): string {
