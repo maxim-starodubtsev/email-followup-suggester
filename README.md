@@ -72,7 +72,7 @@ Followup Suggester/
 
 1. **Clone or download the project**
    ```bash
-   cd "C:\Users\mstarodubtsev\OneDrive - CoreLogic Solutions, LLC\Documents\Followup Suggester"
+   cd "path/to/followup-suggester"
    ```
 
 2. **Install dependencies**
@@ -261,7 +261,7 @@ The add-in comes pre-configured with DIAL API credentials:
 
 ## 📝 License
 
-This project is developed for CoreLogic Solutions, LLC.
+This project is developed by Max Starodubtsev.
 
 ## 🤝 Support
 

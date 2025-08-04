@@ -6,9 +6,9 @@
            xsi:type="MailApp">
   
   <!-- Basic Add-in Information -->
-  <Id>12345678-1234-1234-1234-123456789012</Id>
+  <Id>a8f4c2d6-9e1b-4738-a5c3-2f6d8b9e4a1c</Id>
   <Version>1.0.0.0</Version>
-  <ProviderName>CoreLogic Solutions</ProviderName>
+  <ProviderName>Max Starodubtsev</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   
   <!-- Add-in Display Information -->
@@ -16,10 +16,14 @@
   <Description DefaultValue="An Outlook add-in that helps manage email follow-ups by analyzing sent emails and suggesting which ones need responses."/>
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://github.com/yourusername/followup-suggester"/>
+  <SupportUrl DefaultValue="https://github.com/mstarodubtsev/followup-suggester"/>
   
-  <!-- Permissions -->
-  <Permissions>ReadWriteMailbox</Permissions>
+  <!-- Requirements -->
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.1"/>
+    </Sets>
+  </Requirements>
   
   <!-- Form Factors -->
   <FormSettings>
@@ -31,12 +35,8 @@
     </Form>
   </FormSettings>
   
-  <!-- Requirements -->
-  <Requirements>
-    <Sets>
-      <Set Name="Mailbox" MinVersion="1.1"/>
-    </Sets>
-  </Requirements>
+  <!-- Permissions -->
+  <Permissions>ReadWriteMailbox</Permissions>
   
   <!-- Rule Collection -->
   <Rule xsi:type="RuleCollection" Mode="Or">
@@ -75,7 +75,6 @@
                     <bt:Image size="80" resid="Icon.80x80"/>
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
-                    <TaskpaneId>ButtonId1</TaskpaneId>
                     <SourceLocation resid="Taskpane.Url"/>
                   </Action>
                 </Control>
