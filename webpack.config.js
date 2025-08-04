@@ -84,6 +84,19 @@ module.exports = (env, options) => {
       },
       server: {
         type: 'https'
+      },
+      historyApiFallback: {
+        rewrites: [
+          { from: /^\/taskpane\.html$/, to: '/taskpane.html' },
+          { from: /^\/commands\.html$/, to: '/commands.html' }
+        ]
+      },
+      open: false,
+      client: {
+        overlay: {
+          errors: true,
+          warnings: false
+        }
       }
     }
   };
