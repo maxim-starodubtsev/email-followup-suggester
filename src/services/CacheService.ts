@@ -1,5 +1,4 @@
 import { CacheEntry, CacheStats, CacheOptions, CacheEvictionResult } from '../models/CacheEntry';
-import * as crypto from 'crypto';
 
 export interface ICacheService {
     get<T>(key: string): T | null;
@@ -360,11 +359,22 @@ export class CacheService implements ICacheService {
         
         try {
             const content = typeof data === 'string' ? data : JSON.stringify(data);
-            return crypto.createHash('md5').update(content).digest('hex');
+            return this.simpleHash(content);
         } catch (error) {
             console.warn('Failed to generate content hash:', error);
             return '';
         }
+    }
+
+    private simpleHash(str: string): string {
+        let hash = 0;
+        if (str.length === 0) return hash.toString();
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return Math.abs(hash).toString(36);
     }
 
     private isValidCacheEntry(entry: any): entry is CacheEntry<any> {

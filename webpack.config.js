@@ -1,6 +1,7 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const webpack = require('webpack');
 
 module.exports = (env, options) => {
   const dev = options.mode === 'development';
@@ -22,6 +23,7 @@ module.exports = (env, options) => {
         "crypto": require.resolve("crypto-browserify"),
         "stream": require.resolve("stream-browserify"),
         "buffer": require.resolve("buffer"),
+        "process": require.resolve("process/browser"),
         "vm": false
       }
     },
@@ -55,6 +57,10 @@ module.exports = (env, options) => {
       ]
     },
     plugins: [
+      new webpack.ProvidePlugin({
+        Buffer: ['buffer', 'Buffer'],
+        process: 'process/browser'
+      }),
       new HtmlWebpackPlugin({
         filename: 'taskpane.html',
         template: './src/taskpane/taskpane.html',

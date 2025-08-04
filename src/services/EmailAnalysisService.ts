@@ -361,14 +361,25 @@ export class EmailAnalysisService {
 
     private generateCacheKey(prefix: string, data: any): string {
         try {
-            // Create deterministic hash for consistent caching
+            // Create deterministic hash for consistent caching using a simple hash function
             const content = typeof data === 'string' ? data : JSON.stringify(data);
-            const hash = require('crypto').createHash('md5').update(content).digest('hex');
+            const hash = this.simpleHash(content);
             return `email:${prefix}:${hash}`;
         } catch (error) {
             // Fallback to timestamp-based key
             return `email:${prefix}:${Date.now()}:${Math.random().toString(36).substr(2, 9)}`;
         }
+    }
+
+    private simpleHash(str: string): string {
+        let hash = 0;
+        if (str.length === 0) return hash.toString();
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return Math.abs(hash).toString(36);
     }
 
     private invalidateEmailCaches(emailIds: string[]): void {
