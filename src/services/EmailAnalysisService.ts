@@ -3,6 +3,7 @@ import { LlmService } from './LlmService';
 import { BatchProcessor, BatchProcessingOptions, BatchResult } from './BatchProcessor';
 import { CacheService, ICacheService } from './CacheService';
 import { XmlParsingService, ParsedEmail } from './XmlParsingService';
+import { Configuration } from '../models/Configuration';
 
 interface RetryOptions {
     maxRetries: number;
@@ -28,6 +29,7 @@ export class EmailAnalysisService {
     private llmService?: LlmService;
     private snoozedEmails: Map<string, Date> = new Map();
     private dismissedEmails: Set<string> = new Set();
+    private configuration?: Configuration;
     
     // Enhanced caching with CacheService
     private cacheService: ICacheService;
@@ -62,6 +64,10 @@ export class EmailAnalysisService {
 
     public setLlmService(llmService: LlmService): void {
         this.llmService = llmService;
+    }
+
+    public setConfiguration(configuration: Configuration): void {
+        this.configuration = configuration;
     }
 
     public async analyzeEmails(emailCount: number, daysBack: number, selectedAccounts: string[]): Promise<FollowupEmail[]> {
@@ -363,9 +369,13 @@ export class EmailAnalysisService {
             return null;
         }
 
-        // Check if email is snoozed or dismissed
-        if (this.isEmailSnoozed(lastMessage.id) || this.isEmailDismissed(lastMessage.id)) {
-            console.log(`[DEBUG] Filtered out conversation ${conversationId}: Email is snoozed or dismissed`);
+        // Check if email is snoozed or dismissed (respect user preferences)
+        const isSnoozed = this.isEmailSnoozed(lastMessage.id);
+        const isDismissed = this.isEmailDismissed(lastMessage.id);
+        
+        if ((isSnoozed && !(this.configuration?.showSnoozedEmails)) || 
+            (isDismissed && !(this.configuration?.showDismissedEmails))) {
+            console.log(`[DEBUG] Filtered out conversation ${conversationId}: Email is snoozed or dismissed (user setting)`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
             return null;
         }

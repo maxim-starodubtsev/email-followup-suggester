@@ -285,6 +285,9 @@ class TaskpaneManager {
             await this.loadAvailableAccounts();
             this.populateAccountFilter(config.selectedAccounts);
             
+            // Set configuration in EmailAnalysisService
+            this.emailAnalysisService.setConfiguration(config);
+            
             // Initialize LLM service if configured
             if (config.llmApiEndpoint && config.llmApiKey) {
                 this.llmService = new LlmService(config, this.retryService);
@@ -333,7 +336,11 @@ class TaskpaneManager {
 
     private async saveConfiguration(): Promise<void> {
         try {
+            // Get the current configuration to preserve snooze options and other settings
+            const currentConfig = await this.configurationService.getConfiguration();
+            
             const config: Configuration = {
+                ...currentConfig, // Preserve existing settings
                 emailCount: parseInt(this.emailCountSelect.value),
                 daysBack: parseInt(this.daysBackSelect.value),
                 lastAnalysisDate: new Date(),
@@ -347,8 +354,7 @@ class TaskpaneManager {
                 llmApiVersion: this.llmApiVersionInput.value.trim(),
                 showSnoozedEmails: this.showSnoozedEmailsCheckbox.checked,
                 showDismissedEmails: this.showDismissedEmailsCheckbox.checked,
-                selectedAccounts: Array.from(this.accountFilterSelect.selectedOptions).map(option => option.value),
-                snoozeOptions: [] // Populate this if needed
+                selectedAccounts: Array.from(this.accountFilterSelect.selectedOptions).map(option => option.value)
             };
             await this.configurationService.saveConfiguration(config);
         } catch (error) {
@@ -369,6 +375,10 @@ class TaskpaneManager {
             const selectedAccounts = Array.from(this.accountFilterSelect.selectedOptions).map(option => option.value);
 
             this.debugLog('Analysis parameters', { emailCount, daysBack, selectedAccounts });
+            
+            // Get current configuration and pass it to the EmailAnalysisService
+            const config = await this.configurationService.getConfiguration();
+            this.emailAnalysisService.setConfiguration(config);
             
             this.updateProgress(20, 'Fetching emails...', `Looking for emails from the last ${daysBack} days`);
             
