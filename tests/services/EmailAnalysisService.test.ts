@@ -216,4 +216,426 @@ describe('EmailAnalysisService', () => {
       expect(followupEmail.llmSummary).toBeUndefined();
     });
   });
+
+  describe('Thread Analysis and Response Detection (Bug Fixes)', () => {
+    describe('getLastMessageInThread', () => {
+      it('should return the chronologically latest message', () => {
+        const messages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Original message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Original Email',
+            from: 'recipient@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Response message',
+            isFromCurrentUser: false
+          },
+          {
+            id: 'msg3',
+            subject: 'Re: Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-21T12:00:00Z'),
+            body: 'Follow-up message',
+            isFromCurrentUser: true
+          }
+        ];
+
+        const lastMessage = (service as any).getLastMessageInThread(messages);
+        
+        expect(lastMessage).not.toBeNull();
+        expect(lastMessage.id).toBe('msg2'); // Latest by date
+        expect(lastMessage.sentDate).toEqual(new Date('2025-01-22T15:00:00Z'));
+        expect(lastMessage.isFromCurrentUser).toBe(false);
+      });
+
+      it('should return null for empty thread', () => {
+        const lastMessage = (service as any).getLastMessageInThread([]);
+        expect(lastMessage).toBeNull();
+      });
+
+      it('should handle single message thread', () => {
+        const messages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Single Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Single message',
+            isFromCurrentUser: true
+          }
+        ];
+
+        const lastMessage = (service as any).getLastMessageInThread(messages);
+        
+        expect(lastMessage).not.toBeNull();
+        expect(lastMessage.id).toBe('msg1');
+      });
+    });
+
+    describe('checkForResponseInThread', () => {
+      it('should detect response after last sent message (Bug Fix Case 1)', () => {
+        const messages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Original message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Original Email',
+            from: 'recipient@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Response message',
+            isFromCurrentUser: false
+          }
+        ];
+
+        const lastSentDate = new Date('2025-01-20T10:00:00Z');
+        const hasResponse = (service as any).checkForResponseInThread(messages, lastSentDate);
+        
+        expect(hasResponse).toBe(true);
+      });
+
+      it('should NOT detect response when last message is from current user (Bug Fix Case 2)', () => {
+        const messages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Original Email',
+            from: 'recipient@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Original message',
+            isFromCurrentUser: false
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'My response message',
+            isFromCurrentUser: true
+          }
+        ];
+
+        const lastSentDate = new Date('2025-01-22T15:00:00Z');
+        const hasResponse = (service as any).checkForResponseInThread(messages, lastSentDate);
+        
+        expect(hasResponse).toBe(false);
+      });
+
+      it('should handle complex thread with multiple back-and-forth messages', () => {
+        const messages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Original message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Original Email',
+            from: 'recipient@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-21T09:00:00Z'),
+            body: 'First response',
+            isFromCurrentUser: false
+          },
+          {
+            id: 'msg3',
+            subject: 'Re: Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-22T14:00:00Z'),
+            body: 'My follow-up',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg4',
+            subject: 'Re: Original Email',
+            from: 'recipient@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-23T11:00:00Z'),
+            body: 'Final response',
+            isFromCurrentUser: false
+          }
+        ];
+
+        // Check if there's a response after the user's last message (msg3)
+        const lastUserSentDate = new Date('2025-01-22T14:00:00Z');
+        const hasResponse = (service as any).checkForResponseInThread(messages, lastUserSentDate);
+        
+        expect(hasResponse).toBe(true); // msg4 is a response after msg3
+      });
+
+      it('should not detect responses from current user as external responses', () => {
+        const messages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Original message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Original Email',
+            from: 'user@example.com',
+            to: ['recipient@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Another message from me',
+            isFromCurrentUser: true
+          }
+        ];
+
+        const lastSentDate = new Date('2025-01-20T10:00:00Z');
+        const hasResponse = (service as any).checkForResponseInThread(messages, lastSentDate);
+        
+        expect(hasResponse).toBe(false); // Only messages from current user after the last sent date
+      });
+    });
+
+    describe('parseMessageElement - Case-insensitive email comparison', () => {
+      beforeEach(() => {
+        // Mock Office context for these tests
+        (global as any).Office = {
+          context: {
+            mailbox: {
+              userProfile: {
+                emailAddress: 'User@Example.com' // Mixed case to test normalization
+              }
+            }
+          }
+        };
+      });
+
+      it('should correctly identify current user messages with case variations', () => {
+        const mockElement = document.createElement('div');
+        mockElement.innerHTML = `
+          <t:ItemId Id="test-id" />
+          <t:Subject>Test Subject</t:Subject>
+          <t:DateTimeSent>2025-01-20T10:00:00Z</t:DateTimeSent>
+          <t:From>
+            <t:Mailbox>
+              <t:EmailAddress>user@example.com</t:EmailAddress>
+            </t:Mailbox>
+          </t:From>
+          <t:ToRecipients>
+            <t:Mailbox>
+              <t:EmailAddress>recipient@example.com</t:EmailAddress>
+            </t:Mailbox>
+          </t:ToRecipients>
+          <t:Body>Test body</t:Body>
+        `;
+
+        const currentUserEmail = 'User@Example.com';
+        const message = (service as any).parseMessageElement(mockElement, currentUserEmail);
+        
+        expect(message).not.toBeNull();
+        expect(message.isFromCurrentUser).toBe(true); // Should be true despite case difference
+        expect(message.from).toBe('user@example.com');
+      });
+
+      it('should correctly identify external messages', () => {
+        const mockElement = document.createElement('div');
+        mockElement.innerHTML = `
+          <t:ItemId Id="test-id" />
+          <t:Subject>Test Subject</t:Subject>
+          <t:DateTimeSent>2025-01-20T10:00:00Z</t:DateTimeSent>
+          <t:From>
+            <t:Mailbox>
+              <t:EmailAddress>OTHER@EXAMPLE.COM</t:EmailAddress>
+            </t:Mailbox>
+          </t:From>
+          <t:ToRecipients>
+            <t:Mailbox>
+              <t:EmailAddress>user@example.com</t:EmailAddress>
+            </t:Mailbox>
+          </t:ToRecipients>
+          <t:Body>Test body</t:Body>
+        `;
+
+        const currentUserEmail = 'user@example.com';
+        const message = (service as any).parseMessageElement(mockElement, currentUserEmail);
+        
+        expect(message).not.toBeNull();
+        expect(message.isFromCurrentUser).toBe(false);
+        expect(message.from).toBe('OTHER@EXAMPLE.COM');
+      });
+    });
+
+    describe('Conversation Processing Integration Tests', () => {
+      beforeEach(() => {
+        // Mock Office context
+        (global as any).Office = {
+          context: {
+            mailbox: {
+              userProfile: {
+                emailAddress: 'user@example.com'
+              }
+            }
+          }
+        };
+      });
+
+      it('should filter out conversations where last message has a response (Bug Case 1)', async () => {
+        // Mock the thread retrieval to return a conversation with a response
+        const mockThreadMessages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Project Update',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Please review the project update',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Project Update',
+            from: 'client@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Thanks for the update. Looks good!',
+            isFromCurrentUser: false
+          }
+        ];
+
+        // Spy on the cached method to return our mock data
+        jest.spyOn(service as any, 'getConversationThreadCached')
+          .mockResolvedValue(mockThreadMessages);
+
+        const result = await (service as any).processConversationWithCaching(
+          'conv1',
+          [{ id: 'msg1' }],
+          'user@example.com',
+          []
+        );
+
+        expect(result).toBeNull(); // Should be filtered out because there's a response
+      });
+
+      it('should include conversations where current user sent last message without response (Bug Case 2)', async () => {
+        // Mock the thread retrieval to return a conversation where user sent the last message
+        const mockThreadMessages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Project Question',
+            from: 'client@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'I have a question about the project',
+            isFromCurrentUser: false
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Project Question',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Here is my response to your question',
+            isFromCurrentUser: true
+          }
+        ];
+
+        // Spy on the cached method to return our mock data
+        jest.spyOn(service as any, 'getConversationThreadCached')
+          .mockResolvedValue(mockThreadMessages);
+
+        jest.spyOn(service as any, 'createFollowupEmailEnhanced')
+          .mockResolvedValue({
+            id: 'msg2',
+            subject: 'Re: Project Question',
+            recipients: ['client@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Here is my response to your question',
+            summary: 'Response to project question',
+            priority: 'medium' as const,
+            daysWithoutResponse: 3,
+            conversationId: 'conv1',
+            hasAttachments: false,
+            accountEmail: 'user@example.com',
+            threadMessages: mockThreadMessages,
+            isSnoozed: false,
+            isDismissed: false
+          });
+
+        const result = await (service as any).processConversationWithCaching(
+          'conv1',
+          [{ id: 'msg1' }],
+          'user@example.com',
+          []
+        );
+
+        expect(result).not.toBeNull(); // Should be included for followup
+        expect(result.id).toBe('msg2');
+      });
+
+      it('should handle conversations with mixed case email addresses', async () => {
+        const mockThreadMessages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Test Email',
+            from: 'USER@EXAMPLE.COM', // Different case
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Test message',
+            isFromCurrentUser: true // Should be correctly identified
+          }
+        ];
+
+        jest.spyOn(service as any, 'getConversationThreadCached')
+          .mockResolvedValue(mockThreadMessages);
+
+        jest.spyOn(service as any, 'createFollowupEmailEnhanced')
+          .mockResolvedValue({
+            id: 'msg1',
+            subject: 'Test Email',
+            recipients: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Test message',
+            summary: 'Test message',
+            priority: 'low' as const,
+            daysWithoutResponse: 16,
+            conversationId: 'conv1',
+            hasAttachments: false,
+            accountEmail: 'USER@EXAMPLE.COM',
+            threadMessages: mockThreadMessages,
+            isSnoozed: false,
+            isDismissed: false
+          });
+
+        const result = await (service as any).processConversationWithCaching(
+          'conv1',
+          [{ id: 'msg1' }],
+          'user@example.com', // Different case
+          []
+        );
+
+        expect(result).not.toBeNull();
+        expect(result.accountEmail).toBe('USER@EXAMPLE.COM');
+      });
+    });
+  });
 });

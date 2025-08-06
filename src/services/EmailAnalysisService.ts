@@ -584,15 +584,44 @@ export class EmailAnalysisService {
 
     private async getConversationThread(emailItemId: string): Promise<ThreadMessage[]> {
         return new Promise((resolve, reject) => {
+            // First get the conversation ID from the email
             Office.context.mailbox.makeEwsRequestAsync(
-                this.buildGetConversationRequest(emailItemId),
-                (result) => {
+                this.buildGetConversationIdRequest(emailItemId),
+                async (result) => {
                     if (result.status === Office.AsyncResultStatus.Succeeded) {
                         try {
-                            const response = result.value;
-                            const threadMessages = this.parseConversationResponse(response);
-                            resolve(threadMessages);
+                            const conversationId = this.parseConversationIdResponse(result.value);
+                            if (!conversationId) {
+                                console.log(`[DEBUG] No conversation ID found, returning single message`);
+                                const singleMessage = this.parseConversationResponse(result.value);
+                                resolve(singleMessage);
+                                return;
+                            }
+                            
+                            // Now get the full conversation
+                            Office.context.mailbox.makeEwsRequestAsync(
+                                this.buildGetFullConversationRequest(conversationId),
+                                (conversationResult) => {
+                                    if (conversationResult.status === Office.AsyncResultStatus.Succeeded) {
+                                        try {
+                                            const threadMessages = this.parseFullConversationResponse(conversationResult.value);
+                                            console.log(`[DEBUG] Successfully retrieved ${threadMessages.length} messages in thread`);
+                                            resolve(threadMessages);
+                                        } catch (error) {
+                                            console.error('[ERROR] Failed to parse full conversation response:', error);
+                                            // Fallback to single message
+                                            const singleMessage = this.parseConversationResponse(result.value);
+                                            resolve(singleMessage);
+                                        }
+                                    } else {
+                                        console.warn('[WARN] Failed to get full conversation, falling back to single message');
+                                        const singleMessage = this.parseConversationResponse(result.value);
+                                        resolve(singleMessage);
+                                    }
+                                }
+                            );
                         } catch (error) {
+                            console.error('[ERROR] Failed to parse conversation ID response:', error);
                             reject(error);
                         }
                     } else {
@@ -603,42 +632,10 @@ export class EmailAnalysisService {
         });
     }
 
-    private buildGetConversationRequest(emailItemId: string): string {
-        // Use GetItem to get the email first, then extract the proper ConversationId
-        // This approach is more reliable than trying to use item IDs as conversation IDs
-        return `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
-               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
-               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
-               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Header>
-    <t:RequestServerVersion Version="Exchange2013" />
-  </soap:Header>
-  <soap:Body>
-    <m:GetItem>
-      <m:ItemShape>
-        <t:BaseShape>IdOnly</t:BaseShape>
-        <t:AdditionalProperties>
-          <t:FieldURI FieldURI="conversation:ConversationId" />
-          <t:FieldURI FieldURI="item:Subject" />
-          <t:FieldURI FieldURI="item:DateTimeSent" />
-          <t:FieldURI FieldURI="message:ToRecipients" />
-          <t:FieldURI FieldURI="message:From" />
-          <t:FieldURI FieldURI="item:Body" />
-        </t:AdditionalProperties>
-      </m:ItemShape>
-      <m:ItemIds>
-        <t:ItemId Id="${emailItemId}" />
-      </m:ItemIds>
-    </m:GetItem>
-  </soap:Body>
-</soap:Envelope>`;
-    }
-
     private parseConversationResponse(xmlResponse: string): ThreadMessage[] {
         console.log(`[DEBUG] Parsing EWS GetItem response to extract email details`);
         
-        const currentUserEmail = Office.context.mailbox.userProfile.emailAddress;
+        const currentUserEmail = Office.context.mailbox.userProfile.emailAddress.toLowerCase();
         
         // Validate the XML response first
         const validation = this.xmlParsingService.validateEwsResponse(xmlResponse);
@@ -660,88 +657,15 @@ export class EmailAnalysisService {
             }
             
             const messageElement = messageElements[0];
+            const threadMessage = this.parseMessageElement(messageElement, currentUserEmail);
             
-            // Extract ItemId with proper handling
-            const itemIdElements = messageElement.getElementsByTagName('t:ItemId');
-            const itemId = itemIdElements.length > 0 ? itemIdElements[0].getAttribute('Id') || '' : '';
-            
-            // Extract basic message details with robust parsing
-            const getElementText = (tagName: string): string => {
-                const elements = messageElement.getElementsByTagName(tagName);
-                return elements.length > 0 ? (elements[0].textContent || '').trim() : '';
-            };
-            
-            const subject = getElementText('t:Subject');
-            const dateTimeSent = getElementText('t:DateTimeSent');
-            
-            // Extract body with different possible formats
-            let body = '';
-            const bodyElements = messageElement.getElementsByTagName('t:Body');
-            if (bodyElements.length > 0) {
-                body = bodyElements[0].textContent || '';
+            if (threadMessage) {
+                console.log(`[DEBUG] Successfully parsed single email: "${threadMessage.subject}" from ${threadMessage.from} (${threadMessage.isFromCurrentUser ? 'current user' : 'other'})`);
+                return [threadMessage];
+            } else {
+                console.log(`[DEBUG] Failed to parse message element`);
+                return [];
             }
-            
-            // Extract From address with proper nested parsing
-            let fromAddress = currentUserEmail; // Default fallback
-            const fromElements = messageElement.getElementsByTagName('t:From');
-            if (fromElements.length > 0) {
-                // Try to get EmailAddress from nested Mailbox
-                const mailboxElements = fromElements[0].getElementsByTagName('t:Mailbox');
-                if (mailboxElements.length > 0) {
-                    const emailElements = mailboxElements[0].getElementsByTagName('t:EmailAddress');
-                    if (emailElements.length > 0) {
-                        fromAddress = emailElements[0].textContent || currentUserEmail;
-                    }
-                } else {
-                    // Fallback to direct EmailAddress
-                    const emailElements = fromElements[0].getElementsByTagName('t:EmailAddress');
-                    if (emailElements.length > 0) {
-                        fromAddress = emailElements[0].textContent || currentUserEmail;
-                    }
-                }
-            }
-            
-            // Extract To recipients with robust parsing
-            const toRecipients: string[] = [];
-            const toRecipientsElements = messageElement.getElementsByTagName('t:ToRecipients');
-            if (toRecipientsElements.length > 0) {
-                const mailboxElements = toRecipientsElements[0].getElementsByTagName('t:Mailbox');
-                for (let i = 0; i < mailboxElements.length; i++) {
-                    const emailElements = mailboxElements[i].getElementsByTagName('t:EmailAddress');
-                    if (emailElements.length > 0) {
-                        const email = emailElements[0].textContent;
-                        if (email && email.trim()) {
-                            toRecipients.push(email.trim());
-                        }
-                    }
-                }
-            }
-            
-            // Parse date with fallback
-            let sentDate: Date;
-            try {
-                sentDate = dateTimeSent ? new Date(dateTimeSent) : new Date();
-                // Validate the date
-                if (isNaN(sentDate.getTime())) {
-                    sentDate = new Date();
-                }
-            } catch (error) {
-                console.warn(`[WARN] Failed to parse date: ${dateTimeSent}, using current date`);
-                sentDate = new Date();
-            }
-            
-            const threadMessage: ThreadMessage = {
-                id: itemId,
-                subject: subject || 'No Subject',
-                from: fromAddress,
-                to: toRecipients,
-                sentDate: sentDate,
-                body: body,
-                isFromCurrentUser: fromAddress === currentUserEmail || fromAddress.toLowerCase() === currentUserEmail.toLowerCase()
-            };
-            
-            console.log(`[DEBUG] Successfully parsed email: "${threadMessage.subject}" from ${threadMessage.from} (${threadMessage.isFromCurrentUser ? 'current user' : 'other'})`);
-            return [threadMessage];
             
         } catch (error) {
             console.error(`[ERROR] Failed to parse GetItem response:`, error);
@@ -758,9 +682,30 @@ export class EmailAnalysisService {
     }
 
     private checkForResponseInThread(threadMessages: ThreadMessage[], lastSentDate: Date): boolean {
-        return threadMessages.some(message => 
-            !message.isFromCurrentUser && message.sentDate > lastSentDate
-        );
+        console.log(`[DEBUG] Checking for responses after ${lastSentDate.toISOString()}`);
+        console.log(`[DEBUG] Thread has ${threadMessages.length} messages total`);
+        
+        // Find all messages after the last sent date that are not from current user
+        const responsesAfterLastSent = threadMessages.filter(message => {
+            const isAfterLastSent = message.sentDate > lastSentDate;
+            const isFromOther = !message.isFromCurrentUser;
+            
+            console.log(`[DEBUG] Message from ${message.from} at ${message.sentDate.toISOString()}: ` +
+                       `after last sent = ${isAfterLastSent}, from other = ${isFromOther}`);
+            
+            return isAfterLastSent && isFromOther;
+        });
+        
+        const hasResponse = responsesAfterLastSent.length > 0;
+        console.log(`[DEBUG] Found ${responsesAfterLastSent.length} responses after last sent message`);
+        
+        if (hasResponse) {
+            responsesAfterLastSent.forEach(response => {
+                console.log(`[DEBUG] Response found: from ${response.from} at ${response.sentDate.toISOString()}`);
+            });
+        }
+        
+        return hasResponse;
     }
 
     private generateSummary(emailBody: string, subject: string): string {
@@ -971,5 +916,216 @@ export class EmailAnalysisService {
         // Calculate rolling average processing time
         const totalTime = this.performanceMetrics.averageProcessingTime * (this.performanceMetrics.totalAnalyzed - analyzedCount);
         this.performanceMetrics.averageProcessingTime = (totalTime + processingTime) / this.performanceMetrics.totalAnalyzed;
+    }
+
+    // Helper methods for enhanced thread analysis
+    private buildGetConversationIdRequest(emailItemId: string): string {
+        return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2013" />
+  </soap:Header>
+  <soap:Body>
+    <m:GetItem>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="conversation:ConversationId" />
+          <t:FieldURI FieldURI="item:Subject" />
+          <t:FieldURI FieldURI="item:DateTimeSent" />
+          <t:FieldURI FieldURI="message:ToRecipients" />
+          <t:FieldURI FieldURI="message:From" />
+          <t:FieldURI FieldURI="item:Body" />
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ItemIds>
+        <t:ItemId Id="${emailItemId}" />
+      </m:ItemIds>
+    </m:GetItem>
+  </soap:Body>
+</soap:Envelope>`;
+    }
+
+    private parseConversationIdResponse(xmlResponse: string): string | null {
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
+            
+            const conversationIdElements = xmlDoc.getElementsByTagName('t:ConversationId');
+            if (conversationIdElements.length > 0) {
+                const conversationId = conversationIdElements[0].getAttribute('Id');
+                console.log(`[DEBUG] Found conversation ID: ${conversationId}`);
+                return conversationId;
+            }
+            
+            console.log(`[DEBUG] No conversation ID found in response`);
+            return null;
+        } catch (error) {
+            console.error(`[ERROR] Failed to parse conversation ID response:`, error);
+            return null;
+        }
+    }
+
+    private buildGetFullConversationRequest(conversationId: string): string {
+        return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2013" />
+  </soap:Header>
+  <soap:Body>
+    <m:GetConversationItems>
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Subject" />
+          <t:FieldURI FieldURI="item:DateTimeSent" />
+          <t:FieldURI FieldURI="message:ToRecipients" />
+          <t:FieldURI FieldURI="message:From" />
+          <t:FieldURI FieldURI="item:Body" />
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:ConversationsRequestType>
+        <t:ConversationId Id="${conversationId}" />
+      </m:ConversationsRequestType>
+    </m:GetConversationItems>
+  </soap:Body>
+</soap:Envelope>`;
+    }
+
+    private parseFullConversationResponse(xmlResponse: string): ThreadMessage[] {
+        const currentUserEmail = Office.context.mailbox.userProfile.emailAddress.toLowerCase();
+        const threadMessages: ThreadMessage[] = [];
+        
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
+            
+            // Look for all message elements in the conversation
+            const messageElements = xmlDoc.getElementsByTagName('t:Message');
+            
+            for (let i = 0; i < messageElements.length; i++) {
+                const messageElement = messageElements[i];
+                
+                try {
+                    const threadMessage = this.parseMessageElement(messageElement, currentUserEmail);
+                    if (threadMessage) {
+                        threadMessages.push(threadMessage);
+                    }
+                } catch (error) {
+                    console.warn(`[WARN] Failed to parse message ${i}:`, error);
+                    // Continue processing other messages
+                }
+            }
+            
+            // Sort messages by date to ensure proper chronological order
+            threadMessages.sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
+            
+            console.log(`[DEBUG] Parsed ${threadMessages.length} messages from full conversation`);
+            return threadMessages;
+            
+        } catch (error) {
+            console.error(`[ERROR] Failed to parse full conversation response:`, error);
+            return [];
+        }
+    }
+
+    private parseMessageElement(messageElement: Element, currentUserEmail: string): ThreadMessage | null {
+        try {
+            // Extract ItemId with proper handling
+            const itemIdElements = messageElement.getElementsByTagName('t:ItemId');
+            const itemId = itemIdElements.length > 0 ? itemIdElements[0].getAttribute('Id') || '' : '';
+            
+            // Extract basic message details with robust parsing
+            const getElementText = (tagName: string): string => {
+                const elements = messageElement.getElementsByTagName(tagName);
+                return elements.length > 0 ? (elements[0].textContent || '').trim() : '';
+            };
+            
+            const subject = getElementText('t:Subject');
+            const dateTimeSent = getElementText('t:DateTimeSent');
+            
+            // Extract body with different possible formats
+            let body = '';
+            const bodyElements = messageElement.getElementsByTagName('t:Body');
+            if (bodyElements.length > 0) {
+                body = bodyElements[0].textContent || '';
+            }
+            
+            // Extract From address with proper nested parsing
+            let fromAddress = currentUserEmail; // Default fallback
+            const fromElements = messageElement.getElementsByTagName('t:From');
+            if (fromElements.length > 0) {
+                // Try to get EmailAddress from nested Mailbox
+                const mailboxElements = fromElements[0].getElementsByTagName('t:Mailbox');
+                if (mailboxElements.length > 0) {
+                    const emailElements = mailboxElements[0].getElementsByTagName('t:EmailAddress');
+                    if (emailElements.length > 0) {
+                        fromAddress = emailElements[0].textContent || currentUserEmail;
+                    }
+                } else {
+                    // Fallback to direct EmailAddress
+                    const emailElements = fromElements[0].getElementsByTagName('t:EmailAddress');
+                    if (emailElements.length > 0) {
+                        fromAddress = emailElements[0].textContent || currentUserEmail;
+                    }
+                }
+            }
+            
+            // Extract To recipients with robust parsing
+            const toRecipients: string[] = [];
+            const toRecipientsElements = messageElement.getElementsByTagName('t:ToRecipients');
+            if (toRecipientsElements.length > 0) {
+                const mailboxElements = toRecipientsElements[0].getElementsByTagName('t:Mailbox');
+                for (let i = 0; i < mailboxElements.length; i++) {
+                    const emailElements = mailboxElements[i].getElementsByTagName('t:EmailAddress');
+                    if (emailElements.length > 0) {
+                        const email = emailElements[0].textContent;
+                        if (email && email.trim()) {
+                            toRecipients.push(email.trim());
+                        }
+                    }
+                }
+            }
+            
+            // Parse date with fallback
+            let sentDate: Date;
+            try {
+                sentDate = dateTimeSent ? new Date(dateTimeSent) : new Date();
+                // Validate the date
+                if (isNaN(sentDate.getTime())) {
+                    sentDate = new Date();
+                }
+            } catch (error) {
+                console.warn(`[WARN] Failed to parse date: ${dateTimeSent}, using current date`);
+                sentDate = new Date();
+            }
+
+            // Normalize email addresses for comparison (case-insensitive)
+            const normalizedFromAddress = fromAddress.toLowerCase().trim();
+            const normalizedCurrentUserEmail = currentUserEmail.toLowerCase().trim();
+            
+            const threadMessage: ThreadMessage = {
+                id: itemId,
+                subject: subject || 'No Subject',
+                from: fromAddress,
+                to: toRecipients,
+                sentDate: sentDate,
+                body: body,
+                isFromCurrentUser: normalizedFromAddress === normalizedCurrentUserEmail
+            };
+            
+            console.log(`[DEBUG] Parsed message: "${threadMessage.subject}" from ${threadMessage.from} (${threadMessage.isFromCurrentUser ? 'current user' : 'other'})`);
+            return threadMessage;
+            
+        } catch (error) {
+            console.error(`[ERROR] Failed to parse message element:`, error);
+            return null;
+        }
     }
 }
