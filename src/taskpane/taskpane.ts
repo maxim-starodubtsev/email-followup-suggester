@@ -2,14 +2,22 @@ import { EmailAnalysisService } from '../services/EmailAnalysisService';
 import { ConfigurationService } from '../services/ConfigurationService';
 import { LlmService } from '../services/LlmService';
 import { RetryService } from '../services/RetryService';
-import { FollowupEmail, SnoozeOption } from '../models/FollowupEmail';
 import { Configuration } from '../models/Configuration';
+import { FollowupEmail } from '../models/FollowupEmail';
+
+interface SnoozeOption {
+    label: string;
+    value: number;
+    isCustom?: boolean;
+}
 
 class TaskpaneManager {
     private emailAnalysisService: EmailAnalysisService;
     private configurationService: ConfigurationService;
     private llmService?: LlmService;
     private retryService: RetryService;
+    
+    // Main controls
     private analyzeButton!: HTMLButtonElement;
     private refreshButton!: HTMLButtonElement;
     private settingsButton!: HTMLButtonElement;
@@ -18,6 +26,8 @@ class TaskpaneManager {
     private accountFilterSelect!: HTMLSelectElement;
     private enableLlmSummaryCheckbox!: HTMLInputElement;
     private enableLlmSuggestionsCheckbox!: HTMLInputElement;
+    
+    // Display elements
     private statusDiv!: HTMLDivElement;
     private loadingDiv!: HTMLDivElement;
     private emptyStateDiv!: HTMLDivElement;
@@ -33,11 +43,24 @@ class TaskpaneManager {
     private llmApiKeyInput!: HTMLInputElement;
     private showSnoozedEmailsCheckbox!: HTMLInputElement;
     private showDismissedEmailsCheckbox!: HTMLInputElement;
+    private aiStatusDiv!: HTMLDivElement;
+    private aiStatusText!: HTMLSpanElement;
+    private testAiConnectionButton!: HTMLButtonElement;
+    private disableAiFeaturesButton!: HTMLButtonElement;
+    private enableAiFeaturesCheckbox!: HTMLInputElement;
+    private llmProviderSelect!: HTMLSelectElement;
+    private llmModelInput!: HTMLInputElement;
+    private llmDeploymentNameInput!: HTMLInputElement;
+    private llmApiVersionInput!: HTMLInputElement;
+    private azureSpecificOptions!: HTMLDivElement;
     
-    // New UI element properties
+    // Enhanced UI elements
     private statsDashboard!: HTMLDivElement;
     private showStatsButton!: HTMLButtonElement;
     private toggleStatsButton!: HTMLButtonElement;
+    
+    // Debug logging
+    private debugEnabled: boolean = true;
     private advancedFilters!: HTMLDivElement;
     private toggleAdvancedFiltersButton!: HTMLButtonElement;
     private threadModal!: HTMLDivElement;
@@ -75,6 +98,20 @@ class TaskpaneManager {
         this.initializeElements();
         this.attachEventListeners();
         this.loadCachedResults();
+        this.initializeDebugLogging();
+    }
+
+    private initializeDebugLogging(): void {
+        if (this.debugEnabled) {
+            console.log('%c[Followup Suggester] Debug logging enabled', 'color: #2196F3; font-weight: bold;');
+            console.log('%cTo see detailed debug output, click "Analyze Emails" and watch this console', 'color: #666;');
+        }
+    }
+
+    private debugLog(message: string, data?: any): void {
+        if (this.debugEnabled) {
+            console.log(`%c[Followup Suggester] ${message}`, 'color: #2196F3;', data || '');
+        }
     }
 
     private initializeElements(): void {
@@ -104,6 +141,16 @@ class TaskpaneManager {
         this.llmApiKeyInput = document.getElementById('llmApiKey') as HTMLInputElement;
         this.showSnoozedEmailsCheckbox = document.getElementById('showSnoozedEmails') as HTMLInputElement;
         this.showDismissedEmailsCheckbox = document.getElementById('showDismissedEmails') as HTMLInputElement;
+        this.aiStatusDiv = document.getElementById('aiStatus') as HTMLDivElement;
+        this.aiStatusText = document.getElementById('aiStatusText') as HTMLSpanElement;
+        this.testAiConnectionButton = document.getElementById('testAiConnection') as HTMLButtonElement;
+        this.disableAiFeaturesButton = document.getElementById('disableAiFeatures') as HTMLButtonElement;
+        this.enableAiFeaturesCheckbox = document.getElementById('enableAiFeatures') as HTMLInputElement;
+        this.llmProviderSelect = document.getElementById('llmProvider') as HTMLSelectElement;
+        this.llmModelInput = document.getElementById('llmModel') as HTMLInputElement;
+        this.llmDeploymentNameInput = document.getElementById('llmDeploymentName') as HTMLInputElement;
+        this.llmApiVersionInput = document.getElementById('llmApiVersion') as HTMLInputElement;
+        this.azureSpecificOptions = document.getElementById('azureSpecificOptions') as HTMLDivElement;
         
         // New UI elements
         this.statsDashboard = document.getElementById('statsDashboard') as HTMLDivElement;
@@ -179,18 +226,38 @@ class TaskpaneManager {
         // Settings modal
         document.getElementById('saveSettings')?.addEventListener('click', () => this.saveSettings());
         document.getElementById('cancelSettings')?.addEventListener('click', () => this.hideSettingsModal());
+        this.testAiConnectionButton.addEventListener('click', () => this.testAiConnection());
+        this.disableAiFeaturesButton.addEventListener('click', () => this.disableAiFeatures());
+        this.enableAiFeaturesCheckbox.addEventListener('change', () => this.toggleAiFeatures());
+        this.llmProviderSelect.addEventListener('change', () => this.handleProviderChange());
         
         // Close modals when clicking outside or on close button
-        document.querySelectorAll('.modal-close').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const modal = (e.target as Element).closest('.modal') as HTMLDivElement;
+        document.addEventListener('click', (e) => {
+            const target = e.target as Element;
+            if (target.classList.contains('modal-close')) {
+                const modal = target.closest('.modal') as HTMLDivElement;
                 if (modal) modal.style.display = 'none';
-            });
+            }
         });
         
         window.addEventListener('click', (e) => {
             if (e.target === this.snoozeModal) this.hideSnoozeModal();
             if (e.target === this.settingsModal) this.hideSettingsModal();
+            // Handle diagnostic modal close on outside click
+            const diagnosticModal = document.getElementById('diagnosticModal');
+            if (diagnosticModal && e.target === diagnosticModal) {
+                diagnosticModal.style.display = 'none';
+            }
+        });
+        
+        // Handle escape key for modal closing
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const diagnosticModal = document.getElementById('diagnosticModal');
+                if (diagnosticModal && diagnosticModal.style.display === 'block') {
+                    diagnosticModal.style.display = 'none';
+                }
+            }
         });
     }
 
@@ -206,6 +273,13 @@ class TaskpaneManager {
             
             if (config.llmApiEndpoint) this.llmEndpointInput.value = config.llmApiEndpoint;
             if (config.llmApiKey) this.llmApiKeyInput.value = config.llmApiKey;
+            if (config.llmModel) this.llmModelInput.value = config.llmModel;
+            if (config.llmProvider) this.llmProviderSelect.value = config.llmProvider;
+            if (config.llmDeploymentName) this.llmDeploymentNameInput.value = config.llmDeploymentName;
+            if (config.llmApiVersion) this.llmApiVersionInput.value = config.llmApiVersion;
+            
+            // Show/hide Azure-specific options
+            this.handleProviderChange();
             
             // Load accounts and populate filter
             await this.loadAvailableAccounts();
@@ -267,6 +341,10 @@ class TaskpaneManager {
                 enableLlmSuggestions: this.enableLlmSuggestionsCheckbox.checked,
                 llmApiEndpoint: this.llmEndpointInput.value.trim(),
                 llmApiKey: this.llmApiKeyInput.value.trim(),
+                llmModel: this.llmModelInput.value.trim(),
+                llmProvider: this.llmProviderSelect.value as 'azure' | 'dial' | 'openai' || undefined,
+                llmDeploymentName: this.llmDeploymentNameInput.value.trim(),
+                llmApiVersion: this.llmApiVersionInput.value.trim(),
                 showSnoozedEmails: this.showSnoozedEmailsCheckbox.checked,
                 showDismissedEmails: this.showDismissedEmailsCheckbox.checked,
                 selectedAccounts: Array.from(this.accountFilterSelect.selectedOptions).map(option => option.value),
@@ -281,6 +359,7 @@ class TaskpaneManager {
     // Enhanced analyzeEmails with progress tracking
     private async analyzeEmails(): Promise<void> {
         try {
+            this.debugLog('Starting email analysis');
             this.setLoadingState(true);
             this.hideStatus();
             this.updateProgress(0, 'Initializing analysis...', 'Getting ready to analyze your emails');
@@ -289,6 +368,8 @@ class TaskpaneManager {
             const daysBack = parseInt(this.daysBackSelect.value);
             const selectedAccounts = Array.from(this.accountFilterSelect.selectedOptions).map(option => option.value);
 
+            this.debugLog('Analysis parameters', { emailCount, daysBack, selectedAccounts });
+            
             this.updateProgress(20, 'Fetching emails...', `Looking for emails from the last ${daysBack} days`);
             
             // Simulate progress updates during analysis
@@ -300,6 +381,11 @@ class TaskpaneManager {
             }, 500);
 
             const followupEmails = await this.emailAnalysisService.analyzeEmails(emailCount, daysBack, selectedAccounts);
+            
+            this.debugLog('Analysis completed', { 
+                foundEmails: followupEmails.length,
+                emails: followupEmails.map(e => ({ subject: e.subject, sentDate: e.sentDate, recipients: e.recipients }))
+            });
             
             clearInterval(progressInterval);
             this.updateProgress(100, 'Analysis complete!', 'Preparing results');
@@ -490,6 +576,28 @@ class TaskpaneManager {
         return emailDiv;
     }
 
+    // Display emails with enhanced UI
+    private displayEmails(emails: FollowupEmail[]): void {
+        this.hideAllStates();
+        
+        if (emails.length === 0) {
+            this.emptyStateDiv.innerHTML = `
+                <h3>No emails need follow-up</h3>
+                <p>Great! You're all caught up with your email responses.</p>
+            `;
+            this.emptyStateDiv.style.display = 'block';
+            return;
+        }
+
+        this.emailListDiv.innerHTML = '';
+        emails.forEach(email => {
+            const emailElement = this.createEmailElement(email);
+            this.emailListDiv.appendChild(emailElement);
+        });
+        
+        this.emailListDiv.style.display = 'block';
+    }
+
     // Handle email action buttons
     private handleEmailAction(event: Event): void {
         const button = event.target as HTMLButtonElement;
@@ -597,6 +705,7 @@ class TaskpaneManager {
 
     private showSettingsModal(): void {
         this.settingsModal.style.display = 'block';
+        this.updateAiStatus(); // Update AI status when opening settings
     }
 
     private hideSettingsModal(): void {
@@ -687,6 +796,8 @@ class TaskpaneManager {
                 return;
             }
 
+            // Update AI status after saving
+            this.updateAiStatus();
             this.hideSettingsModal();
         } catch (error) {
             console.error('Error saving settings:', (error as Error).message);
@@ -746,28 +857,388 @@ class TaskpaneManager {
         await this.loadConfiguration();
         this.hideAllStates();
         this.emptyStateDiv.style.display = 'block';
+        
+        // Load AI disable state
+        const aiDisabled = localStorage.getItem('aiDisabled') === 'true';
+        this.enableAiFeaturesCheckbox.checked = !aiDisabled;
+        
+        this.updateAiStatus(); // Check AI status on initialization
+        
+        // Add diagnostic button event listener
+        const diagnosticButton = document.getElementById('diagnosticButton');
+        if (diagnosticButton) {
+            diagnosticButton.addEventListener('click', () => this.openDiagnosticModal());
+        }
+        
+        // Add close diagnostic modal event listener
+        const closeDiagnosticButton = document.querySelector('#diagnosticModal .modal-close');
+        if (closeDiagnosticButton) {
+            closeDiagnosticButton.addEventListener('click', () => this.closeDiagnosticModal());
+        }
+        
+        // Add event listener for the "Close" button in the modal footer
+        const closeDiagnosticFooterButton = document.getElementById('closeDiagnostic');
+        if (closeDiagnosticFooterButton) {
+            closeDiagnosticFooterButton.addEventListener('click', () => this.closeDiagnosticModal());
+        }
+        
+        // Add event listeners for diagnostic tests
+        const testOfficeButton = document.getElementById('testOfficeContext');
+        const testMailboxButton = document.getElementById('testMailboxAccess');
+        const testAccountsButton = document.getElementById('testAccountDetection');
+        const testEmailsButton = document.getElementById('testEmailReading');
+        
+        if (testOfficeButton) {
+            testOfficeButton.addEventListener('click', () => this.testOfficeContext());
+        }
+        if (testMailboxButton) {
+            testMailboxButton.addEventListener('click', () => this.testMailboxAccess());
+        }
+        if (testAccountsButton) {
+            testAccountsButton.addEventListener('click', () => this.testAccountDetection());
+        }
+        if (testEmailsButton) {
+            testEmailsButton.addEventListener('click', () => this.testEmailReading());
+        }
     }
 
-    // Display emails with enhanced UI
-    private displayEmails(emails: FollowupEmail[]): void {
-        this.hideAllStates();
+    // Diagnostic modal methods
+    private openDiagnosticModal(): void {
+        const modal = document.getElementById('diagnosticModal');
+        if (modal) {
+            modal.style.display = 'block';
+        }
+    }
+
+    private closeDiagnosticModal(): void {
+        const modal = document.getElementById('diagnosticModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    // Diagnostic test methods
+    private async testOfficeContext(): Promise<void> {
+        const output = document.getElementById('diagnosticOutput');
+        if (!output) return;
+
+        try {
+            output.innerHTML = '<strong>Testing Office.js Context...</strong><br>';
+            
+            // Test basic Office.js availability
+            if (typeof Office === 'undefined') {
+                output.innerHTML += '❌ Office.js is not available<br>';
+                return;
+            }
+            output.innerHTML += '✅ Office.js is available<br>';
+
+            // Test host type
+            if (Office.context && Office.context.host) {
+                output.innerHTML += `✅ Host: ${Office.context.host}<br>`;
+            } else {
+                output.innerHTML += '❌ Office.context.host not available<br>';
+            }
+
+            // Test platform
+            if (Office.context && Office.context.platform) {
+                output.innerHTML += `✅ Platform: ${Office.context.platform}<br>`;
+            } else {
+                output.innerHTML += '❌ Office.context.platform not available<br>';
+            }
+
+            // Test mailbox availability
+            if (Office.context && Office.context.mailbox) {
+                output.innerHTML += '✅ Mailbox context available<br>';
+            } else {
+                output.innerHTML += '❌ Mailbox context not available<br>';
+            }
+
+            output.innerHTML += '<br><strong>Office Context Test Complete</strong><br><br>';
+        } catch (error) {
+            output.innerHTML += `❌ Error: ${(error as Error).message}<br>`;
+        }
+    }
+
+    private async testMailboxAccess(): Promise<void> {
+        const output = document.getElementById('diagnosticOutput');
+        if (!output) return;
+
+        try {
+            output.innerHTML += '<strong>Testing Mailbox Access...</strong><br>';
+
+            if (!Office.context.mailbox) {
+                output.innerHTML += '❌ Mailbox not available<br>';
+                return;
+            }
+
+            // Test user profile
+            if (Office.context.mailbox.userProfile) {
+                const profile = Office.context.mailbox.userProfile;
+                output.innerHTML += `✅ User email: ${profile.emailAddress}<br>`;
+                output.innerHTML += `✅ Display name: ${profile.displayName}<br>`;
+                output.innerHTML += `✅ Time zone: ${profile.timeZone}<br>`;
+            } else {
+                output.innerHTML += '❌ User profile not available<br>';
+            }
+
+            // Test diagnostics
+            if (Office.context.mailbox.diagnostics) {
+                const diag = Office.context.mailbox.diagnostics;
+                output.innerHTML += `✅ Host name: ${diag.hostName}<br>`;
+                output.innerHTML += `✅ Host version: ${diag.hostVersion}<br>`;
+                output.innerHTML += `✅ OWA view: ${diag.OWAView}<br>`;
+            } else {
+                output.innerHTML += '❌ Diagnostics not available<br>';
+            }
+
+            output.innerHTML += '<br><strong>Mailbox Access Test Complete</strong><br><br>';
+        } catch (error) {
+            output.innerHTML += `❌ Error: ${(error as Error).message}<br>`;
+        }
+    }
+
+    private async testAccountDetection(): Promise<void> {
+        const output = document.getElementById('diagnosticOutput');
+        if (!output) return;
+
+        try {
+            output.innerHTML += '<strong>Testing Account Detection...</strong><br>';
+
+            // Try to get available accounts using our service
+            try {
+                const accounts = await this.configurationService.getAvailableAccounts();
+                if (accounts.length > 0) {
+                    output.innerHTML += `✅ Found ${accounts.length} account(s):<br>`;
+                    accounts.forEach(account => {
+                        output.innerHTML += `&nbsp;&nbsp;• ${account}<br>`;
+                    });
+                } else {
+                    output.innerHTML += '⚠️ No accounts detected<br>';
+                }
+            } catch (error) {
+                output.innerHTML += `❌ Account detection error: ${(error as Error).message}<br>`;
+            }
+
+            // Test EWS availability (this is often the issue on macOS)
+            if (Office.context.mailbox.makeEwsRequestAsync) {
+                output.innerHTML += '✅ EWS (Exchange Web Services) available<br>';
+                
+                // Test a simple EWS request
+                try {
+                    const simpleEwsRequest = `<?xml version="1.0" encoding="utf-8"?>
+                        <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                       xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+                                       xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+                                       xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+                          <soap:Header>
+                            <t:RequestServerVersion Version="Exchange2013" />
+                          </soap:Header>
+                          <soap:Body>
+                            <m:GetFolder>
+                              <m:FolderShape>
+                                <t:BaseShape>IdOnly</t:BaseShape>
+                              </m:FolderShape>
+                              <m:FolderIds>
+                                <t:DistinguishedFolderId Id="sentitems" />
+                              </m:FolderIds>
+                            </m:GetFolder>
+                          </soap:Body>
+                        </soap:Envelope>`;
+
+                    await new Promise<void>((resolve, reject) => {
+                        Office.context.mailbox.makeEwsRequestAsync(simpleEwsRequest, (result) => {
+                            if (result.status === Office.AsyncResultStatus.Succeeded) {
+                                output.innerHTML += '✅ EWS test request successful<br>';
+                                resolve();
+                            } else {
+                                output.innerHTML += `❌ EWS test failed: ${result.error.message}<br>`;
+                                reject(new Error(result.error.message));
+                            }
+                        });
+                    });
+                } catch (ewsError) {
+                    output.innerHTML += `❌ EWS test request failed: ${(ewsError as Error).message}<br>`;
+                }
+            } else {
+                output.innerHTML += '❌ EWS not available (this is common on macOS)<br>';
+            }
+
+            output.innerHTML += '<br><strong>Account Detection Test Complete</strong><br><br>';
+        } catch (error) {
+            output.innerHTML += `❌ Error: ${(error as Error).message}<br>`;
+        }
+    }
+
+    private async testEmailReading(): Promise<void> {
+        const output = document.getElementById('diagnosticOutput');
+        if (!output) return;
+
+        try {
+            output.innerHTML += '<strong>Testing Email Reading...</strong><br>';
+
+            // Try to read emails using our email analysis service
+            try {
+                output.innerHTML += 'Attempting to read 5 emails from last 7 days...<br>';
+                const emails = await this.emailAnalysisService.analyzeEmails(5, 7, []);
+                
+                if (emails.length > 0) {
+                    output.innerHTML += `✅ Successfully read ${emails.length} email(s)<br>`;
+                    emails.forEach((email, index) => {
+                        output.innerHTML += `&nbsp;&nbsp;${index + 1}. ${email.subject} (${email.sentDate.toLocaleDateString()})<br>`;
+                    });
+                } else {
+                    output.innerHTML += '⚠️ No emails found (this could be normal if no sent emails in timeframe)<br>';
+                }
+            } catch (emailError) {
+                output.innerHTML += `❌ Email reading failed: ${(emailError as Error).message}<br>`;
+                
+                // Provide specific guidance based on error
+                const errorMsg = (emailError as Error).message.toLowerCase();
+                if (errorMsg.includes('ews') || errorMsg.includes('exchange')) {
+                    output.innerHTML += '💡 This appears to be an EWS (Exchange) issue. On macOS, EWS is often limited.<br>';
+                    output.innerHTML += '💡 Consider switching to REST API for better macOS compatibility.<br>';
+                } else if (errorMsg.includes('permission') || errorMsg.includes('unauthorized')) {
+                    output.innerHTML += '💡 This appears to be a permissions issue. Check manifest permissions.<br>';
+                } else if (errorMsg.includes('network') || errorMsg.includes('timeout')) {
+                    output.innerHTML += '💡 This appears to be a network connectivity issue.<br>';
+                }
+            }
+
+            output.innerHTML += '<br><strong>Email Reading Test Complete</strong><br><br>';
+        } catch (error) {
+            output.innerHTML += `❌ Error: ${(error as Error).message}<br>`;
+        }
+    }
+
+    // AI Service Management Methods
+    private updateAiStatus(): void {
+        const aiDisabled = localStorage.getItem('aiDisabled') === 'true';
         
-        if (emails.length === 0) {
-            this.emptyStateDiv.innerHTML = `
-                <h3>No emails need follow-up</h3>
-                <p>Great! You're all caught up with your email responses.</p>
-            `;
-            this.emptyStateDiv.style.display = 'block';
+        if (aiDisabled) {
+            this.setAiStatus('warning', '⚠️ AI features manually disabled');
+            this.enableAiFeaturesCheckbox.checked = false;
             return;
         }
 
-        this.emailListDiv.innerHTML = '';
-        emails.forEach(email => {
-            const emailElement = this.createEmailElement(email);
-            this.emailListDiv.appendChild(emailElement);
-        });
+        if (!this.llmService || !this.llmEndpointInput.value.trim() || !this.llmApiKeyInput.value.trim()) {
+            this.setAiStatus('warning', '⚠️ AI features disabled - No API configuration');
+            return;
+        }
+
+        // Check if circuit breaker is open for llm-api
+        const circuitStates = this.retryService.getCircuitBreakerStates();
+        if (circuitStates['llm-api'] === 'OPEN') {
+            this.setAiStatus('error', '❌ AI service temporarily unavailable - Too many failures detected');
+            return;
+        }
+
+        this.setAiStatus('success', '✅ AI service configured and ready');
+    }
+
+    private toggleAiFeatures(): void {
+        const isEnabled = this.enableAiFeaturesCheckbox.checked;
+        localStorage.setItem('aiDisabled', (!isEnabled).toString());
         
-        this.emailListDiv.style.display = 'block';
+        if (!isEnabled) {
+            this.setAiStatus('warning', '⚠️ AI features manually disabled');
+            this.showStatus('AI features disabled - errors will stop appearing', 'success');
+        } else {
+            this.updateAiStatus();
+            this.showStatus('AI features re-enabled', 'success');
+        }
+    }
+
+    private disableAiFeatures(): void {
+        localStorage.setItem('aiDisabled', 'true');
+        this.enableAiFeaturesCheckbox.checked = false;
+        this.setAiStatus('warning', '⚠️ AI features manually disabled');
+        this.showStatus('AI features disabled - no more AI-related errors will appear', 'success');
+    }
+
+    private handleProviderChange(): void {
+        const provider = this.llmProviderSelect.value;
+        const isAzure = provider === 'azure' || 
+                       (provider === '' && this.llmEndpointInput.value.includes('openai.azure.com'));
+        
+        this.azureSpecificOptions.style.display = isAzure ? 'block' : 'none';
+        
+        // Set default values based on provider
+        if (provider === 'dial' && !this.llmEndpointInput.value) {
+            this.llmEndpointInput.value = 'https://ai-proxy.lab.epam.com/openai/chat/completions';
+            this.llmModelInput.value = 'gpt-35-turbo';
+        } else if (provider === 'azure' && !this.llmEndpointInput.value) {
+            this.llmEndpointInput.placeholder = 'https://your-resource.openai.azure.com';
+            this.llmModelInput.value = 'gpt-35-turbo';
+            this.llmApiVersionInput.value = '2023-12-01-preview';
+        } else if (provider === 'openai' && !this.llmEndpointInput.value) {
+            this.llmEndpointInput.value = 'https://api.openai.com/v1/chat/completions';
+            this.llmModelInput.value = 'gpt-3.5-turbo';
+        }
+    }
+
+    private setAiStatus(type: 'success' | 'warning' | 'error', message: string): void {
+        this.aiStatusDiv.style.display = 'block';
+        this.aiStatusDiv.className = `ai-status ${type}`;
+        this.aiStatusText.textContent = message;
+    }
+
+    private async testAiConnection(): Promise<void> {
+        if (!this.llmEndpointInput.value.trim() || !this.llmApiKeyInput.value.trim()) {
+            this.setAiStatus('warning', '⚠️ Please enter both API endpoint and API key');
+            return;
+        }
+
+        this.setAiStatus('warning', '🔄 Testing AI connection...');
+        this.testAiConnectionButton.disabled = true;
+        this.testAiConnectionButton.textContent = 'Testing...';
+
+        try {
+            // Create a temporary configuration for testing
+            const testConfig: Configuration = {
+                emailCount: 10,
+                daysBack: 7,
+                lastAnalysisDate: new Date(),
+                enableLlmSummary: true,
+                enableLlmSuggestions: true,
+                llmApiEndpoint: this.llmEndpointInput.value.trim(),
+                llmApiKey: this.llmApiKeyInput.value.trim(),
+                llmModel: this.llmModelInput.value.trim() || 'gpt-35-turbo',
+                llmProvider: this.llmProviderSelect.value as 'azure' | 'dial' | 'openai' || undefined,
+                llmDeploymentName: this.llmDeploymentNameInput.value.trim(),
+                llmApiVersion: this.llmApiVersionInput.value.trim() || '2023-12-01-preview',
+                showSnoozedEmails: false,
+                showDismissedEmails: false,
+                selectedAccounts: [],
+                snoozeOptions: []
+            };
+
+            // Create a temporary LLM service for testing
+            const testLlmService = new LlmService(testConfig, this.retryService);
+            
+            // Test with a simple prompt
+            const testPrompt = "Test connection. Please respond with 'Connection successful'.";
+            const response = await testLlmService.generateFollowupSuggestions(testPrompt);
+            
+            if (response && response.length > 0) {
+                this.setAiStatus('success', '✅ AI connection test successful!');
+            } else {
+                this.setAiStatus('error', '❌ AI service responded but with empty result');
+            }
+        } catch (error) {
+            const errorMessage = (error as Error).message;
+            if (errorMessage.includes('502')) {
+                this.setAiStatus('error', '❌ Connection failed: AI service not available (502 error)');
+            } else if (errorMessage.includes('403') || errorMessage.includes('401')) {
+                this.setAiStatus('error', '❌ Connection failed: Invalid API key or unauthorized');
+            } else if (errorMessage.includes('429')) {
+                this.setAiStatus('error', '❌ Connection failed: Rate limit exceeded');
+            } else {
+                this.setAiStatus('error', `❌ Connection failed: ${errorMessage}`);
+            }
+        } finally {
+            this.testAiConnectionButton.disabled = false;
+            this.testAiConnectionButton.textContent = 'Test AI Connection';
+        }
     }
 }
 

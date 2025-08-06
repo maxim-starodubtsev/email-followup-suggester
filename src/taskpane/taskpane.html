@@ -260,6 +260,24 @@
             color: #333;
         }
 
+        .ai-status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .ai-status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .ai-status.warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
         /* Advanced Filtering */
         .advanced-filters {
             background: white;
@@ -569,6 +587,7 @@
         <button id="analyzeButton" class="button">Analyze Emails</button>
         <button id="refreshButton" class="button">Refresh</button>
         <button id="settingsButton" class="button" style="background-color: #6c757d;">Settings</button>
+        <button id="diagnosticButton" class="button" style="background-color: #ff8c00;">🔍 Diagnostics</button>
         <button id="showStatsButton" class="toggle-filters">Show Statistics</button>
         <button id="toggleAdvancedFilters" class="toggle-filters">Advanced Filters</button>
     </div>
@@ -658,6 +677,9 @@
             <div class="modal-body">
                 <div class="settings-section">
                     <h4>AI Integration</h4>
+                    <div class="ai-status" id="aiStatus" style="padding: 8px; border-radius: 4px; margin-bottom: 10px; display: none;">
+                        <span id="aiStatusText">Checking AI service...</span>
+                    </div>
                     <div class="control-group">
                         <label for="llmEndpoint">LLM API Endpoint:</label>
                         <input type="text" id="llmEndpoint" placeholder="https://ai-proxy.lab.epam.com" value="https://ai-proxy.lab.epam.com">
@@ -666,10 +688,42 @@
                         <label for="llmApiKey">API Key:</label>
                         <input type="password" id="llmApiKey" placeholder="Enter your API key" value="dial-qjboupii21tb26eakd3ytcsb9po">
                     </div>
+                    <div class="control-group">
+                        <label for="llmProvider">API Provider:</label>
+                        <select id="llmProvider">
+                            <option value="">Auto-detect</option>
+                            <option value="dial">DIAL API (EPAM)</option>
+                            <option value="azure">Azure OpenAI</option>
+                            <option value="openai">OpenAI</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="llmModel">Model Name:</label>
+                        <input type="text" id="llmModel" placeholder="gpt-35-turbo" value="gpt-35-turbo">
+                    </div>
+                    <div id="azureSpecificOptions" style="display: none;">
+                        <div class="control-group">
+                            <label for="llmDeploymentName">Deployment Name (Azure):</label>
+                            <input type="text" id="llmDeploymentName" placeholder="my-gpt-35-turbo-deployment">
+                        </div>
+                        <div class="control-group">
+                            <label for="llmApiVersion">API Version (Azure):</label>
+                            <input type="text" id="llmApiVersion" placeholder="2023-12-01-preview" value="2023-12-01-preview">
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <button id="testAiConnection" class="button" style="background-color: #28a745;">Test AI Connection</button>
+                        <button id="disableAiFeatures" class="button" style="background-color: #dc3545;">Disable AI Features</button>
+                    </div>
                 </div>
                 
                 <div class="settings-section">
                     <h4>Display Options</h4>
+                    <div class="control-group">
+                        <label>
+                            <input type="checkbox" id="enableAiFeatures" checked> Enable AI Features (summaries and suggestions)
+                        </label>
+                    </div>
                     <div class="control-group">
                         <label>
                             <input type="checkbox" id="showSnoozedEmails"> Show snoozed emails
@@ -698,6 +752,41 @@
             </div>
             <div class="thread-body" id="threadBody">
                 <!-- Thread messages will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnostic Modal -->
+    <div id="diagnosticModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3>🔍 Add-in Diagnostics</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" style="max-height: 500px; overflow-y: auto;">
+                <div class="settings-section">
+                    <h4>Office Context & Permissions</h4>
+                    <div id="diagnosticOutput" style="font-size: 12px; font-family: monospace; background: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 10px; max-height: 200px; overflow-y: auto;">
+                        Click a test button to begin diagnostics...
+                    </div>
+                    <button id="testOfficeContext" class="button" style="font-size: 12px; margin-right: 5px;">Test Office Context</button>
+                    <button id="testMailboxAccess" class="button" style="font-size: 12px; margin-right: 5px;">Test Mailbox Access</button>
+                    <button id="testAccountDetection" class="button" style="font-size: 12px; margin-right: 5px;">Test Account Detection</button>
+                    <button id="testEmailReading" class="button" style="font-size: 12px;">Test Email Reading</button>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Troubleshooting Tips</h4>
+                    <div style="font-size: 12px; color: #666;">
+                        <p><strong>Step 1:</strong> Ensure you have sent emails in your mailbox</p>
+                        <p><strong>Step 2:</strong> Try reading an email first to establish context</p>
+                        <p><strong>Step 3:</strong> Check if EWS is enabled on your Exchange server</p>
+                        <p><strong>Step 4:</strong> Verify add-in permissions are correct</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeDiagnostic" class="button" style="background-color: #6c757d;">Close</button>
             </div>
         </div>
     </div>

@@ -2,6 +2,7 @@ import { FollowupEmail, ThreadMessage } from '../models/FollowupEmail';
 import { LlmService } from './LlmService';
 import { BatchProcessor, BatchProcessingOptions, BatchResult } from './BatchProcessor';
 import { CacheService, ICacheService } from './CacheService';
+import { XmlParsingService, ParsedEmail } from './XmlParsingService';
 
 interface RetryOptions {
     maxRetries: number;
@@ -42,9 +43,11 @@ export class EmailAnalysisService {
     };
 
     private batchProcessor: BatchProcessor;
+    private xmlParsingService: XmlParsingService;
 
     constructor(cacheService?: ICacheService) {
         this.batchProcessor = new BatchProcessor();
+        this.xmlParsingService = new XmlParsingService();
         
         // Initialize enhanced caching system
         this.cacheService = cacheService || new CacheService({
@@ -62,20 +65,35 @@ export class EmailAnalysisService {
     }
 
     public async analyzeEmails(emailCount: number, daysBack: number, selectedAccounts: string[]): Promise<FollowupEmail[]> {
+        console.log(`[DEBUG] Starting analyzeEmails - Count: ${emailCount}, Days: ${daysBack}, Accounts: ${JSON.stringify(selectedAccounts)}`);
+        
         const startTime = Date.now();
         this.trackAnalyticsEvent('batch_processed', { emailCount, daysBack, selectedAccounts });
 
         try {
             const currentUserEmail = Office.context.mailbox.userProfile.emailAddress;
+            console.log(`[DEBUG] Current user email: ${currentUserEmail}`);
+            
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+            console.log(`[DEBUG] Cutoff date: ${cutoffDate.toISOString()}`);
 
             // Get sent emails with enhanced caching and error retry
             const sentEmails = await this.getSentEmailsWithCaching(emailCount, cutoffDate);
+            console.log(`[DEBUG] Retrieved ${sentEmails.length} sent emails`);
 
             // Group emails by conversation ID
             const conversationGroups = this.groupEmailsByConversation(sentEmails);
             const conversationIds = Array.from(conversationGroups.keys());
+            console.log(`[DEBUG] Grouped into ${conversationIds.length} conversation groups`);
+            
+            // Log conversation details
+            conversationGroups.forEach((emails, conversationId) => {
+                console.log(`[DEBUG] Conversation ${conversationId}: ${emails.length} emails`);
+                emails.forEach((email, index) => {
+                    console.log(`[DEBUG]   Email ${index + 1}: "${email.subject}" sent ${email.dateTimeSent}`);
+                });
+            });
 
             // Use BatchProcessor for improved performance and error handling
             const batchOptions: Partial<BatchProcessingOptions> = {
@@ -117,6 +135,16 @@ export class EmailAnalysisService {
             // Filter out null results and collect successful followup emails
             const followupEmails: FollowupEmail[] = batchResult.results
                 .filter((result): result is FollowupEmail => result !== null);
+
+            console.log(`[DEBUG] Final result: ${followupEmails.length} emails need followup out of ${sentEmails.length} sent emails`);
+            
+            if (followupEmails.length === 0) {
+                console.log(`[DEBUG] No followup emails found. This could mean:`);
+                console.log(`[DEBUG] - All emails have been replied to`);
+                console.log(`[DEBUG] - You weren't the last person to send in the conversations`);
+                console.log(`[DEBUG] - All emails are outside the time window`);
+                console.log(`[DEBUG] - Account filtering excluded all emails`);
+            }
 
             // Log batch processing results with cache stats
             const cacheStats = this.cacheService.getStats();
@@ -286,7 +314,7 @@ export class EmailAnalysisService {
 
     private async processConversationWithCaching(
         conversationId: string, 
-        _conversationEmails: any[],
+        conversationEmails: any[],
         currentUserEmail: string, 
         selectedAccounts: string[]
     ): Promise<FollowupEmail | null> {
@@ -301,11 +329,20 @@ export class EmailAnalysisService {
         this.trackAnalyticsEvent('cache_miss', { type: 'analysis' });
 
         // Get the full thread for this conversation with caching
-        const threadMessages = await this.getConversationThreadCached(conversationId);
+        // Use the first email's item ID since conversationId might not be a valid conversation ID
+        const firstEmail = conversationEmails[0];
+        const emailItemId = firstEmail.id;
+        
+        const threadMessages = await this.getConversationThreadCached(emailItemId);
         
         // Check if the last email in thread was sent by current user
         const lastMessage = this.getLastMessageInThread(threadMessages);
         if (!lastMessage || !lastMessage.isFromCurrentUser) {
+            // Debug logging
+            console.log(`[DEBUG] Filtered out conversation ${conversationId}: ${!lastMessage ? 'No messages found' : 'Last message not from current user'}`);
+            if (lastMessage) {
+                console.log(`[DEBUG] Last message from: ${lastMessage.from}, Current user: ${currentUserEmail}`);
+            }
             // Cache null result to avoid reprocessing
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000); // 5 minutes for null results
             return null;
@@ -314,18 +351,21 @@ export class EmailAnalysisService {
         // Check if there's been a response after the last sent message
         const hasResponse = this.checkForResponseInThread(threadMessages, lastMessage.sentDate);
         if (hasResponse) {
+            console.log(`[DEBUG] Filtered out conversation ${conversationId}: Has response after last sent message`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
             return null;
         }
 
         // Filter by selected accounts if specified
         if (selectedAccounts.length > 0 && !selectedAccounts.includes(lastMessage.from)) {
+            console.log(`[DEBUG] Filtered out conversation ${conversationId}: Account filter (${lastMessage.from} not in selected accounts)`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
             return null;
         }
 
         // Check if email is snoozed or dismissed
         if (this.isEmailSnoozed(lastMessage.id) || this.isEmailDismissed(lastMessage.id)) {
+            console.log(`[DEBUG] Filtered out conversation ${conversationId}: Email is snoozed or dismissed`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
             return null;
         }
@@ -338,8 +378,8 @@ export class EmailAnalysisService {
         return followupEmail;
     }
 
-    private async getConversationThreadCached(conversationId: string): Promise<ThreadMessage[]> {
-        const cacheKey = this.generateCacheKey('thread', conversationId);
+    private async getConversationThreadCached(emailItemId: string): Promise<ThreadMessage[]> {
+        const cacheKey = this.generateCacheKey('thread', emailItemId);
         
         const cached = this.cacheService.get<ThreadMessage[]>(cacheKey);
         if (cached) {
@@ -350,7 +390,7 @@ export class EmailAnalysisService {
         this.trackAnalyticsEvent('cache_miss', { type: 'thread' });
         
         const thread = await this.withRetry(
-            () => this.getConversationThread(conversationId),
+            () => this.getConversationThread(emailItemId),
             this.DEFAULT_RETRY_OPTIONS
         );
         
@@ -510,62 +550,32 @@ export class EmailAnalysisService {
 </soap:Envelope>`;
     }
 
-    private parseSentEmailsResponse(xmlResponse: string): any[] {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
-        const messages = xmlDoc.getElementsByTagName('t:Message');
+    private parseSentEmailsResponse(xmlResponse: string): ParsedEmail[] {
+        console.log(`[DEBUG] Parsing EWS FindItem response using XmlParsingService`);
         
-        const emails: any[] = [];
-        for (let i = 0; i < messages.length; i++) {
-            const message = messages[i];
-            const email = {
-                id: this.getElementText(message, 't:ItemId', 'Id'),
-                subject: this.getElementText(message, 't:Subject'),
-                dateTimeSent: this.getElementText(message, 't:DateTimeSent'),
-                conversationId: this.getElementText(message, 't:ConversationId', 'Id'),
-                body: { content: this.getElementText(message, 't:Body') },
-                from: { emailAddress: { address: this.getElementText(message, 't:From t:Mailbox t:EmailAddress') } },
-                toRecipients: this.parseRecipients(message, 't:ToRecipients')
-            };
-            emails.push(email);
+        // Validate the XML response first
+        const validation = this.xmlParsingService.validateEwsResponse(xmlResponse);
+        if (!validation.isValid) {
+            console.error(`[ERROR] Invalid EWS response: ${validation.error}`);
+            return [];
         }
+        
+        // Use the new parsing service
+        const emails = this.xmlParsingService.parseFindItemResponse(xmlResponse);
+        console.log(`[DEBUG] XmlParsingService parsed ${emails.length} emails`);
+        
+        // Log details for first few emails
+        emails.slice(0, 3).forEach((email, index) => {
+            console.log(`[DEBUG] Email ${index + 1}: Subject="${email.subject}", Date=${email.dateTimeSent}, From=${email.from.emailAddress.address}`);
+        });
         
         return emails;
     }
 
-    private getElementText(parent: Element, selector: string, attribute?: string): string {
-        const element = parent.querySelector(selector);
-        if (!element) return '';
-        
-        if (attribute) {
-            return element.getAttribute(attribute) || '';
-        }
-        
-        return element.textContent || '';
-    }
-
-    private parseRecipients(message: Element, selector: string): any[] {
-        const recipientsElement = message.querySelector(selector);
-        if (!recipientsElement) return [];
-        
-        const mailboxes = recipientsElement.querySelectorAll('t:Mailbox');
-        const recipients: any[] = [];
-        
-        for (let i = 0; i < mailboxes.length; i++) {
-            const mailbox = mailboxes[i];
-            const emailAddress = this.getElementText(mailbox, 't:EmailAddress');
-            if (emailAddress) {
-                recipients.push({ emailAddress: { address: emailAddress } });
-            }
-        }
-        
-        return recipients;
-    }
-
-    private async getConversationThread(conversationId: string): Promise<ThreadMessage[]> {
+    private async getConversationThread(emailItemId: string): Promise<ThreadMessage[]> {
         return new Promise((resolve, reject) => {
             Office.context.mailbox.makeEwsRequestAsync(
-                this.buildGetConversationRequest(conversationId),
+                this.buildGetConversationRequest(emailItemId),
                 (result) => {
                     if (result.status === Office.AsyncResultStatus.Succeeded) {
                         try {
@@ -583,7 +593,9 @@ export class EmailAnalysisService {
         });
     }
 
-    private buildGetConversationRequest(conversationId: string): string {
+    private buildGetConversationRequest(emailItemId: string): string {
+        // Use GetItem to get the email first, then extract the proper ConversationId
+        // This approach is more reliable than trying to use item IDs as conversation IDs
         return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
@@ -593,10 +605,11 @@ export class EmailAnalysisService {
     <t:RequestServerVersion Version="Exchange2013" />
   </soap:Header>
   <soap:Body>
-    <m:GetConversationItems>
+    <m:GetItem>
       <m:ItemShape>
         <t:BaseShape>IdOnly</t:BaseShape>
         <t:AdditionalProperties>
+          <t:FieldURI FieldURI="conversation:ConversationId" />
           <t:FieldURI FieldURI="item:Subject" />
           <t:FieldURI FieldURI="item:DateTimeSent" />
           <t:FieldURI FieldURI="message:ToRecipients" />
@@ -604,40 +617,126 @@ export class EmailAnalysisService {
           <t:FieldURI FieldURI="item:Body" />
         </t:AdditionalProperties>
       </m:ItemShape>
-      <m:ConversationsRequestType>
-        <t:ConversationId Id="${conversationId}" />
-      </m:ConversationsRequestType>
-    </m:GetConversationItems>
+      <m:ItemIds>
+        <t:ItemId Id="${emailItemId}" />
+      </m:ItemIds>
+    </m:GetItem>
   </soap:Body>
 </soap:Envelope>`;
     }
 
     private parseConversationResponse(xmlResponse: string): ThreadMessage[] {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
-        const messages = xmlDoc.getElementsByTagName('t:Message');
+        console.log(`[DEBUG] Parsing EWS GetItem response to extract email details`);
         
         const currentUserEmail = Office.context.mailbox.userProfile.emailAddress;
-        const threadMessages: ThreadMessage[] = [];
         
-        for (let i = 0; i < messages.length; i++) {
-            const message = messages[i];
-            const fromEmail = this.getElementText(message, 't:From t:Mailbox t:EmailAddress');
-            
-            const threadMessage: ThreadMessage = {
-                id: this.getElementText(message, 't:ItemId', 'Id'),
-                subject: this.getElementText(message, 't:Subject'),
-                from: fromEmail,
-                to: this.parseRecipients(message, 't:ToRecipients').map(r => r.emailAddress.address),
-                sentDate: new Date(this.getElementText(message, 't:DateTimeSent')),
-                body: this.getElementText(message, 't:Body'),
-                isFromCurrentUser: fromEmail === currentUserEmail
-            };
-            
-            threadMessages.push(threadMessage);
+        // Validate the XML response first
+        const validation = this.xmlParsingService.validateEwsResponse(xmlResponse);
+        if (!validation.isValid) {
+            console.error(`[ERROR] Invalid EWS response: ${validation.error}`);
+            return [];
         }
         
-        return threadMessages.sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
+        // Parse the GetItem response which contains a single email item
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
+            
+            // Look for the message element in the GetItem response
+            const messageElements = xmlDoc.getElementsByTagName('t:Message');
+            if (messageElements.length === 0) {
+                console.log(`[DEBUG] No message found in GetItem response`);
+                return [];
+            }
+            
+            const messageElement = messageElements[0];
+            
+            // Extract ItemId with proper handling
+            const itemIdElements = messageElement.getElementsByTagName('t:ItemId');
+            const itemId = itemIdElements.length > 0 ? itemIdElements[0].getAttribute('Id') || '' : '';
+            
+            // Extract basic message details with robust parsing
+            const getElementText = (tagName: string): string => {
+                const elements = messageElement.getElementsByTagName(tagName);
+                return elements.length > 0 ? (elements[0].textContent || '').trim() : '';
+            };
+            
+            const subject = getElementText('t:Subject');
+            const dateTimeSent = getElementText('t:DateTimeSent');
+            
+            // Extract body with different possible formats
+            let body = '';
+            const bodyElements = messageElement.getElementsByTagName('t:Body');
+            if (bodyElements.length > 0) {
+                body = bodyElements[0].textContent || '';
+            }
+            
+            // Extract From address with proper nested parsing
+            let fromAddress = currentUserEmail; // Default fallback
+            const fromElements = messageElement.getElementsByTagName('t:From');
+            if (fromElements.length > 0) {
+                // Try to get EmailAddress from nested Mailbox
+                const mailboxElements = fromElements[0].getElementsByTagName('t:Mailbox');
+                if (mailboxElements.length > 0) {
+                    const emailElements = mailboxElements[0].getElementsByTagName('t:EmailAddress');
+                    if (emailElements.length > 0) {
+                        fromAddress = emailElements[0].textContent || currentUserEmail;
+                    }
+                } else {
+                    // Fallback to direct EmailAddress
+                    const emailElements = fromElements[0].getElementsByTagName('t:EmailAddress');
+                    if (emailElements.length > 0) {
+                        fromAddress = emailElements[0].textContent || currentUserEmail;
+                    }
+                }
+            }
+            
+            // Extract To recipients with robust parsing
+            const toRecipients: string[] = [];
+            const toRecipientsElements = messageElement.getElementsByTagName('t:ToRecipients');
+            if (toRecipientsElements.length > 0) {
+                const mailboxElements = toRecipientsElements[0].getElementsByTagName('t:Mailbox');
+                for (let i = 0; i < mailboxElements.length; i++) {
+                    const emailElements = mailboxElements[i].getElementsByTagName('t:EmailAddress');
+                    if (emailElements.length > 0) {
+                        const email = emailElements[0].textContent;
+                        if (email && email.trim()) {
+                            toRecipients.push(email.trim());
+                        }
+                    }
+                }
+            }
+            
+            // Parse date with fallback
+            let sentDate: Date;
+            try {
+                sentDate = dateTimeSent ? new Date(dateTimeSent) : new Date();
+                // Validate the date
+                if (isNaN(sentDate.getTime())) {
+                    sentDate = new Date();
+                }
+            } catch (error) {
+                console.warn(`[WARN] Failed to parse date: ${dateTimeSent}, using current date`);
+                sentDate = new Date();
+            }
+            
+            const threadMessage: ThreadMessage = {
+                id: itemId,
+                subject: subject || 'No Subject',
+                from: fromAddress,
+                to: toRecipients,
+                sentDate: sentDate,
+                body: body,
+                isFromCurrentUser: fromAddress === currentUserEmail || fromAddress.toLowerCase() === currentUserEmail.toLowerCase()
+            };
+            
+            console.log(`[DEBUG] Successfully parsed email: "${threadMessage.subject}" from ${threadMessage.from} (${threadMessage.isFromCurrentUser ? 'current user' : 'other'})`);
+            return [threadMessage];
+            
+        } catch (error) {
+            console.error(`[ERROR] Failed to parse GetItem response:`, error);
+            return [];
+        }
     }
 
     private getLastMessageInThread(threadMessages: ThreadMessage[]): ThreadMessage | null {
@@ -702,8 +801,11 @@ export class EmailAnalysisService {
         let llmSuggestion: string | undefined;
         let sentiment: 'positive' | 'neutral' | 'negative' | 'urgent' = 'neutral';
 
-        // Get LLM analysis if available
-        if (this.llmService) {
+        // Check if AI features are disabled globally
+        const aiDisabled = localStorage.getItem('aiDisabled') === 'true';
+
+        // Get LLM analysis if available and not disabled
+        if (this.llmService && !aiDisabled) {
             try {
                 const [llmResponse, sentimentResult] = await Promise.all([
                     this.llmService.analyzeThread({

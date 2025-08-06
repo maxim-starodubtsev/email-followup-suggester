@@ -10,27 +10,53 @@ The Followup Suggester uses the DIAL API (Distributed Inference for AI Language 
 
 The add-in comes pre-configured with the following DIAL API settings:
 
-```javascript
-// Pre-configured DIAL API settings
-const DEFAULT_CONFIG = {
-  apiEndpoint: "https://ai-proxy.lab.epam.com",
-  apiKey: "dial-qjboupii21tb26eakd3ytcsb9po",
-  modelName: "gpt-4o-mini-2024-07-18"
+```typescript
+// Default DIAL API configuration in ConfigurationService
+const DEFAULT_CONFIG: Configuration = {
+  // ... other settings
+  llmProvider: 'dial',
+  llmApiEndpoint: 'http://localhost:8080',
+  llmModel: 'gpt-4o-mini',
+  llmApiKey: '',
+  llmApiVersion: '2024-02-01',
+  llmDeploymentName: '',
+  enableLlmSummary: false,
+  enableLlmSuggestions: false
 };
+```
+
+**Important**: You need to configure your actual API endpoint and key before the AI features will work.
+
+### Quick Setup for DIAL API
+
+For immediate setup with DIAL API defaults:
+
+```typescript
+// Use default DIAL API settings (localhost:8080, gpt-4o-mini)
+const configService = new ConfigurationService();
+await configService.setupDialApi(
+    'http://your-actual-dial-server:8080',
+    'your-api-key'
+);
 ```
 
 ### API Endpoints
 
-#### Primary Endpoint
-- **Base URL**: `https://ai-proxy.lab.epam.com`
-- **Chat Completions**: `/openai/chat/completions`
-- **Models List**: `/openai/models`
-- **Model Limits**: `/v1/deployments/{model}/limits`
+#### DIAL API (Default Provider)
+- **Base URL**: `http://localhost:8080` (configurable)
+- **Chat Completions**: `/v1/chat/completions`
+- **Models List**: `/v1/models`
+- **Authentication**: API Key in header (`Authorization: Bearer <key>`)
 
-#### Authentication
-- **Method**: API Key in header
-- **Header**: `Api-Key: dial-qjboupii21tb26eakd3ytcsb9po`
-- **Content-Type**: `application/json`
+#### Azure OpenAI
+- **Base URL**: `https://<resource>.openai.azure.com`
+- **Chat Completions**: `/openai/deployments/<deployment>/chat/completions?api-version=<version>`
+- **Authentication**: API Key in header (`api-key: <key>`)
+
+#### OpenAI
+- **Base URL**: `https://api.openai.com`
+- **Chat Completions**: `/v1/chat/completions`
+- **Authentication**: Bearer token (`Authorization: Bearer <key>`)
 
 ## 🔧 Configuration Methods
 
@@ -38,15 +64,74 @@ const DEFAULT_CONFIG = {
 
 1. **Open the Add-in** in Outlook
 2. **Click the Settings button** (gear icon)
-3. **Configure AI Integration section**:
-   - **LLM API Endpoint**: Enter your DIAL API endpoint URL
+3. **Configure LLM Provider**:
+   - **Provider**: Select "DIAL API", "Azure OpenAI", or "OpenAI"
+   - **Base URL**: Enter your API endpoint URL
    - **API Key**: Enter your authentication key
+   - **Model**: Enter your model name
+   - **Deployment Name** (Azure only): Enter your Azure deployment name
+   - **API Version** (Azure only): Enter API version (e.g., "2024-02-01")
 4. **Enable AI Features**:
    - ☑️ Use AI for email summaries
    - ☑️ Use AI for follow-up suggestions
 5. **Click Save Settings**
 
-### Method 2: Direct Code Configuration
+### Method 2: Programmatic Configuration
+
+Use the ConfigurationService helper methods for easy setup:
+
+#### DIAL API Setup
+```typescript
+import { ConfigurationService } from './services/ConfigurationService';
+
+const configService = new ConfigurationService();
+
+// Basic DIAL API configuration with defaults
+await configService.setupDialApi();
+
+// Custom DIAL API configuration
+await configService.setupDialApi(
+    'http://your-dial-endpoint:8080',  // endpoint
+    'your-api-key',                    // API key
+    'gpt-4o-mini'                      // model name
+);
+```
+
+#### Azure OpenAI Setup
+```typescript
+// Azure OpenAI configuration
+await configService.setupAzureOpenAi(
+    'https://your-resource.openai.azure.com',  // endpoint
+    'your-azure-api-key',                      // API key
+    'your-deployment-name',                    // deployment name
+    '2024-02-01',                              // API version (optional)
+    'gpt-4'                                    // model name (optional)
+);
+```
+
+#### OpenAI Setup
+```typescript
+// Direct OpenAI configuration
+await configService.setupOpenAi(
+    'your-openai-api-key',           // API key
+    'gpt-4',                         // model name (optional)
+    'https://api.openai.com'         // endpoint (optional)
+);
+```
+
+#### Check Current Configuration
+```typescript
+// Get current LLM configuration
+const llmConfig = await configService.getLlmConfiguration();
+console.log('Provider:', llmConfig.provider);
+console.log('Endpoint:', llmConfig.endpoint);
+console.log('Model:', llmConfig.model);
+console.log('Is Configured:', llmConfig.isConfigured);
+```
+
+### Method 3: Direct Code Configuration
+
+Update the configuration in `src/services/ConfigurationService.ts` defaults:
 
 Update the configuration in `src/services/LlmService.ts`:
 
