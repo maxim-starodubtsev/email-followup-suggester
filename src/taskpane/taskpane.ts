@@ -323,7 +323,22 @@ class TaskpaneManager {
     }
 
     private populateSnoozeOptions(options: SnoozeOption[]): void {
+        console.log('populateSnoozeOptions called with:', options);
         this.snoozeOptionsSelect.innerHTML = '';
+        
+        if (!options || options.length === 0) {
+            console.warn('No snooze options provided, using default options');
+            // Fallback to default options
+            options = [
+                { label: '15 minutes', value: 15 },
+                { label: '1 hour', value: 60 },
+                { label: '4 hours', value: 240 },
+                { label: '1 day', value: 1440 },
+                { label: '3 days', value: 4320 },
+                { label: '1 week', value: 10080 },
+                { label: 'Custom...', value: 0, isCustom: true }
+            ];
+        }
         
         options.forEach(option => {
             const optionElement = document.createElement('option');
@@ -331,7 +346,10 @@ class TaskpaneManager {
             optionElement.textContent = option.label;
             optionElement.dataset.isCustom = option.isCustom?.toString() || 'false';
             this.snoozeOptionsSelect.appendChild(optionElement);
+            console.log(`Added snooze option: ${option.label} (${option.value} minutes)`);
         });
+        
+        console.log(`Total snooze options added: ${this.snoozeOptionsSelect.children.length}`);
     }
 
     private async saveConfiguration(): Promise<void> {
@@ -580,7 +598,11 @@ class TaskpaneManager {
         // Attach event listeners to action buttons
         const actionButtons = emailDiv.querySelectorAll('.action-button');
         actionButtons.forEach(button => {
-            button.addEventListener('click', (e) => this.handleEmailAction(e));
+            button.addEventListener('click', (e) => {
+                this.handleEmailAction(e).catch(error => {
+                    console.error('Error handling email action:', error);
+                });
+            });
         });
 
         return emailDiv;
@@ -609,7 +631,7 @@ class TaskpaneManager {
     }
 
     // Handle email action buttons
-    private handleEmailAction(event: Event): void {
+    private async handleEmailAction(event: Event): Promise<void> {
         const button = event.target as HTMLButtonElement;
         const emailId = button.dataset.emailId!;
         const action = button.dataset.action!;
@@ -622,7 +644,7 @@ class TaskpaneManager {
                 this.forwardEmail(emailId);
                 break;
             case 'snooze':
-                this.showSnoozeModal(emailId);
+                await this.showSnoozeModal(emailId);
                 break;
             case 'dismiss':
                 this.dismissEmail(emailId);
@@ -702,8 +724,29 @@ class TaskpaneManager {
     }
 
     // Modal management methods
-    private showSnoozeModal(emailId: string): void {
+    private async showSnoozeModal(emailId: string): Promise<void> {
         this.currentEmailForSnooze = emailId;
+        
+        // Ensure snooze options are populated
+        try {
+            const config = await this.configurationService.getConfiguration();
+            this.populateSnoozeOptions(config.snoozeOptions);
+            console.log('Snooze options populated:', config.snoozeOptions);
+        } catch (error) {
+            console.error('Error loading snooze options:', error);
+            // Fallback to default options if configuration fails
+            const defaultOptions: SnoozeOption[] = [
+                { label: '15 minutes', value: 15 },
+                { label: '1 hour', value: 60 },
+                { label: '4 hours', value: 240 },
+                { label: '1 day', value: 1440 },
+                { label: '3 days', value: 4320 },
+                { label: '1 week', value: 10080 },
+                { label: 'Custom...', value: 0, isCustom: true }
+            ];
+            this.populateSnoozeOptions(defaultOptions);
+        }
+        
         this.snoozeModal.style.display = 'block';
     }
 
