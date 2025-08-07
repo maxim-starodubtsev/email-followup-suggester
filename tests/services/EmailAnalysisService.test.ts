@@ -637,5 +637,179 @@ describe('EmailAnalysisService', () => {
         expect(result.accountEmail).toBe('USER@EXAMPLE.COM');
       });
     });
+
+    describe('Enhanced Thread Retrieval', () => {
+      beforeEach(() => {
+        // Mock Office context
+        (global as any).Office = {
+          context: {
+            mailbox: {
+              userProfile: {
+                emailAddress: 'user@example.com'
+              }
+            }
+          }
+        };
+      });
+
+      it('should search conversation across multiple folders', async () => {
+        // Mock the searchConversationAcrossFolders method
+        const mockSearchResults: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Original Email',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Original message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Re: Original Email',
+            from: 'client@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'),
+            body: 'Response message',
+            isFromCurrentUser: false
+          }
+        ];
+
+        jest.spyOn(service as any, 'searchConversationAcrossFolders')
+          .mockResolvedValue(mockSearchResults);
+
+        jest.spyOn(service as any, 'parseConversationIdResponse')
+          .mockReturnValue('conv-123');
+
+        const result = await (service as any).searchConversationAcrossFolders('conv-123');
+
+        expect(result).toHaveLength(2);
+        expect(result[0].isFromCurrentUser).toBe(true);
+        expect(result[1].isFromCurrentUser).toBe(false);
+      });
+
+      it('should remove duplicate messages from search results', () => {
+        const duplicateMessages: ThreadMessage[] = [
+          {
+            id: 'msg1',
+            subject: 'Test Email',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Test message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg1', // Same ID - should be deduplicated
+            subject: 'Test Email',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Test message',
+            isFromCurrentUser: true
+          },
+          {
+            id: 'msg2',
+            subject: 'Different Email',
+            from: 'client@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-21T10:00:00Z'),
+            body: 'Different message',
+            isFromCurrentUser: false
+          }
+        ];
+
+        const uniqueMessages = (service as any).removeDuplicateMessages(duplicateMessages);
+
+        expect(uniqueMessages).toHaveLength(2);
+        expect(uniqueMessages[0].id).toBe('msg1');
+        expect(uniqueMessages[1].id).toBe('msg2');
+      });
+
+      it('should handle messages without IDs using content-based deduplication', () => {
+        const messagesWithoutIds: ThreadMessage[] = [
+          {
+            id: '',
+            subject: 'Test Email',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Test message',
+            isFromCurrentUser: true
+          },
+          {
+            id: '',
+            subject: 'Test Email', // Same content - should be deduplicated
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'),
+            body: 'Test message',
+            isFromCurrentUser: true
+          }
+        ];
+
+        const uniqueMessages = (service as any).removeDuplicateMessages(messagesWithoutIds);
+
+        expect(uniqueMessages).toHaveLength(1);
+      });
+
+      it('should sort messages chronologically', async () => {
+        const unsortedMessages: ThreadMessage[] = [
+          {
+            id: 'msg2',
+            subject: 'Second Email',
+            from: 'client@example.com',
+            to: ['user@example.com'],
+            sentDate: new Date('2025-01-22T15:00:00Z'), // Later date: 1737558000000
+            body: 'Second message',
+            isFromCurrentUser: false
+          },
+          {
+            id: 'msg1',
+            subject: 'First Email',
+            from: 'user@example.com',
+            to: ['client@example.com'],
+            sentDate: new Date('2025-01-20T10:00:00Z'), // Earlier date: 1737367200000
+            body: 'First message',
+            isFromCurrentUser: true
+          }
+        ];
+
+        // Mock the individual folder searches to return messages in different orders
+        const mockSearchConversationInFolder = jest.spyOn(service as any, 'searchConversationInFolder')
+          .mockImplementation(async (...args: any[]) => {
+            const [, folderId] = args;
+            if (folderId === 'sentitems') {
+              return [unsortedMessages[1]]; // Return msg1 from sent items
+            } else if (folderId === 'inbox') {
+              return [unsortedMessages[0]]; // Return msg2 from inbox
+            }
+            return [];
+          });
+
+        // Mock the removeDuplicateMessages to return the messages as-is (no duplicates in this test)
+        const mockRemoveDuplicateMessages = jest.spyOn(service as any, 'removeDuplicateMessages')
+          .mockImplementation((...args: any[]) => {
+            const [messages] = args;
+            return messages;
+          });
+
+        const result = await (service as any).searchConversationAcrossFolders('conv-123');
+
+        // Verify the result is sorted chronologically (earliest first)
+        expect(result).toHaveLength(2);
+        expect(result[0].sentDate.getTime()).toBeLessThan(result[1].sentDate.getTime());
+        expect(result[0].id).toBe('msg1'); // Earlier message first (2025-01-20)
+        expect(result[1].id).toBe('msg2'); // Later message second (2025-01-22)
+        
+        // Additional verification with actual timestamps
+        expect(result[0].sentDate.getTime()).toBe(1737367200000); // 2025-01-20T10:00:00Z
+        expect(result[1].sentDate.getTime()).toBe(1737558000000); // 2025-01-22T15:00:00Z
+
+        // Restore the original implementations
+        mockSearchConversationInFolder.mockRestore();
+        mockRemoveDuplicateMessages.mockRestore();
+      });
+    });
   });
 });
