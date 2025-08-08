@@ -1107,11 +1107,15 @@ export class EmailAnalysisService {
     private async searchConversationAcrossFolders(conversationId: string): Promise<ThreadMessage[]> {
         console.log(`[DEBUG] Searching for conversation ${conversationId} across multiple folders`);
         
+        // Include root (deep traversal) to satisfy requirement: analyze across all folders & sub-folders
+        // Order chosen to prioritise cheaper targeted folders before deep mailbox scan
         const folders = [
             'sentitems',      // Sent Items
             'inbox',          // Inbox
             'drafts',         // Drafts
-            'deleteditems'    // Deleted Items
+            'deleteditems',   // Deleted Items
+            'archive',        // Archive (if present; harmless if not)
+            'msgfolderroot'   // Root (Deep traversal)
         ];
         
         const allMessages: ThreadMessage[] = [];
@@ -1181,7 +1185,11 @@ export class EmailAnalysisService {
     private async searchConversationInFolder(conversationId: string, folderId: string): Promise<ThreadMessage[]> {
         return new Promise((resolve) => {
             Office.context.mailbox.makeEwsRequestAsync(
-                this.buildSearchConversationRequest(conversationId, folderId),
+                this.buildSearchConversationRequest(
+                    conversationId,
+                    folderId,
+                    folderId === 'msgfolderroot' ? 'Deep' : 'Shallow'
+                ),
                 (result) => {
                     if (result.status === Office.AsyncResultStatus.Succeeded) {
                         try {
@@ -1200,42 +1208,42 @@ export class EmailAnalysisService {
         });
     }
 
-    private buildSearchConversationRequest(conversationId: string, folderId: string): string {
-        return `<?xml version="1.0" encoding="utf-8"?>
+        private buildSearchConversationRequest(conversationId: string, folderId: string, traversal: 'Shallow' | 'Deep' = 'Shallow'): string {
+                return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
-               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
-               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
-               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Header>
-    <t:RequestServerVersion Version="Exchange2013" />
-  </soap:Header>
-  <soap:Body>
-    <m:FindItem Traversal="Shallow">
-      <m:ItemShape>
-        <t:BaseShape>IdOnly</t:BaseShape>
-        <t:AdditionalProperties>
-          <t:FieldURI FieldURI="item:Subject" />
-          <t:FieldURI FieldURI="item:DateTimeSent" />
-          <t:FieldURI FieldURI="message:ToRecipients" />
-          <t:FieldURI FieldURI="message:From" />
-          <t:FieldURI FieldURI="item:Body" />
-          <t:FieldURI FieldURI="conversation:ConversationId" />
-        </t:AdditionalProperties>
-      </m:ItemShape>
-      <m:IndexedPageItemView MaxEntriesReturned="100" Offset="0" BasePoint="Beginning" />
-      <m:Restriction>
-        <t:IsEqualTo>
-          <t:FieldURI FieldURI="conversation:ConversationId" />
-          <t:FieldURIOrConstant>
-            <t:Constant Value="${conversationId}" />
-          </t:FieldURIOrConstant>
-        </t:IsEqualTo>
-      </m:Restriction>
-      <m:ParentFolderIds>
-        <t:DistinguishedFolderId Id="${folderId}" />
-      </m:ParentFolderIds>
-    </m:FindItem>
-  </soap:Body>
+                             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
+                             xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
+                             xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Header>
+        <t:RequestServerVersion Version="Exchange2013" />
+    </soap:Header>
+    <soap:Body>
+        <m:FindItem Traversal="${traversal}">
+            <m:ItemShape>
+                <t:BaseShape>IdOnly</t:BaseShape>
+                <t:AdditionalProperties>
+                    <t:FieldURI FieldURI="item:Subject" />
+                    <t:FieldURI FieldURI="item:DateTimeSent" />
+                    <t:FieldURI FieldURI="message:ToRecipients" />
+                    <t:FieldURI FieldURI="message:From" />
+                    <t:FieldURI FieldURI="item:Body" />
+                    <t:FieldURI FieldURI="conversation:ConversationId" />
+                </t:AdditionalProperties>
+            </m:ItemShape>
+            <m:IndexedPageItemView MaxEntriesReturned="200" Offset="0" BasePoint="Beginning" />
+            <m:Restriction>
+                <t:IsEqualTo>
+                    <t:FieldURI FieldURI="conversation:ConversationId" />
+                    <t:FieldURIOrConstant>
+                        <t:Constant Value="${conversationId}" />
+                    </t:FieldURIOrConstant>
+                </t:IsEqualTo>
+            </m:Restriction>
+            <m:ParentFolderIds>
+                <t:DistinguishedFolderId Id="${folderId}" />
+            </m:ParentFolderIds>
+        </m:FindItem>
+    </soap:Body>
 </soap:Envelope>`;
     }
 

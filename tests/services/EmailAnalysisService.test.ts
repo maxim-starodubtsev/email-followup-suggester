@@ -737,6 +737,35 @@ describe('EmailAnalysisService', () => {
         };
       });
 
+      it('should build deep traversal request for root folder (msgfolderroot)', async () => {
+        const spy = jest.spyOn(service as any, 'buildSearchConversationRequest');
+        // Force search across folders
+        jest.spyOn(service as any, 'searchConversationInFolder').mockImplementation(async (...args: any[]) => {
+          const conv = args[0];
+            const folder = args[1];
+          (service as any).buildSearchConversationRequest(conv, folder, folder === 'msgfolderroot' ? 'Deep' : 'Shallow');
+          return [];
+        });
+        await (service as any).searchConversationAcrossFolders('conv-deep');
+        const deepCall = spy.mock.calls.find(c => c[1] === 'msgfolderroot');
+        expect(deepCall).toBeDefined();
+        if (deepCall) {
+          expect(deepCall[2]).toBe('Deep');
+        }
+        spy.mockRestore();
+      });
+
+      it('should include archive and root folders in folder scan ordering', async () => {
+        const foldersEncountered: string[] = [];
+        jest.spyOn(service as any, 'searchConversationInFolder').mockImplementation(async (...args: any[]) => {
+          const folder = args[1];
+          foldersEncountered.push(folder);
+          return [];
+        });
+        await (service as any).searchConversationAcrossFolders('conv-folders');
+        ['sentitems','inbox','drafts','deleteditems','archive','msgfolderroot'].forEach(f => expect(foldersEncountered).toContain(f));
+      });
+
       it('should search conversation across multiple folders', async () => {
         // Mock the searchConversationAcrossFolders method
         const mockSearchResults: ThreadMessage[] = [
