@@ -84,12 +84,13 @@ export class EmailAnalysisService {
             cutoffDate.setDate(cutoffDate.getDate() - daysBack);
             console.log(`[DEBUG] Cutoff date: ${cutoffDate.toISOString()}`);
 
-            // Get sent emails with enhanced caching and error retry
-            const sentEmails = await this.getSentEmailsWithCaching(emailCount, cutoffDate);
-            console.log(`[DEBUG] Retrieved ${sentEmails.length} sent emails`);
+            // Get recent emails across multiple folders (not just Sent) with caching and retry
+            // This implements requirement to analyze emails across all folders
+            const recentEmails = await this.getRecentEmailsWithCaching(emailCount, cutoffDate);
+            console.log(`[DEBUG] Retrieved ${recentEmails.length} recent emails across folders`);
 
             // Group emails by conversation ID
-            const conversationGroups = this.groupEmailsByConversation(sentEmails);
+            const conversationGroups = this.groupEmailsByConversation(recentEmails);
             const conversationIds = Array.from(conversationGroups.keys());
             console.log(`[DEBUG] Grouped into ${conversationIds.length} conversation groups`);
             
@@ -142,7 +143,7 @@ export class EmailAnalysisService {
             const followupEmails: FollowupEmail[] = batchResult.results
                 .filter((result): result is FollowupEmail => result !== null);
 
-            console.log(`[DEBUG] Final result: ${followupEmails.length} emails need followup out of ${sentEmails.length} sent emails`);
+            console.log(`[DEBUG] Final result: ${followupEmails.length} emails need followup out of ${recentEmails.length} retrieved emails`);
             
             if (followupEmails.length === 0) {
                 console.log(`[DEBUG] No followup emails found. This could mean:`);
@@ -317,6 +318,109 @@ export class EmailAnalysisService {
         this.cacheService.set(cacheKey, emails, 15 * 60 * 1000);
         return emails;
     }
+
+        // NEW: Retrieve recent emails from multiple folders (sent + inbox) to evaluate threads globally
+        private async getRecentEmailsWithCaching(emailCount: number, cutoffDate: Date): Promise<any[]> {
+                const cacheKey = this.generateCacheKey('recent_emails', { emailCount, cutoffDate: cutoffDate.toISOString() });
+                const cached = this.cacheService.get<any[]>(cacheKey);
+                if (cached) {
+                        this.trackAnalyticsEvent('cache_hit', { type: 'recent_emails' });
+                        return cached;
+                }
+                this.trackAnalyticsEvent('cache_miss', { type: 'recent_emails' });
+
+                // Fetch from both Sent Items and Inbox (could be extended further later)
+                const [sent, inbox] = await this.withRetry(
+                        async () => Promise.all([
+                                this.getSentEmailsRest(Math.ceil(emailCount / 2), cutoffDate),
+                                this.getInboxEmailsRest(Math.ceil(emailCount / 2), cutoffDate)
+                        ]),
+                        this.DEFAULT_RETRY_OPTIONS
+                );
+
+            // Fallback: if inbox returns nothing, reuse legacy sent emails logic (ensures legacy method referenced)
+            if (inbox.length === 0) {
+                try {
+                    const legacySent = await this.getSentEmailsWithCaching(emailCount, cutoffDate);
+                    if (legacySent.length > sent.length) {
+                        sent.push(...legacySent.filter(e => !sent.some(s => s.id === e.id)));
+                    }
+                } catch (_) {
+                    // ignore fallback error
+                }
+            }
+
+                // Merge and sort by DateTimeSent desc, then truncate to requested emailCount
+                const merged = [...sent, ...inbox]
+                        .sort((a, b) => new Date(b.dateTimeSent).getTime() - new Date(a.dateTimeSent).getTime())
+                        .slice(0, emailCount);
+
+                this.cacheService.set(cacheKey, merged, 15 * 60 * 1000);
+                return merged;
+        }
+
+        private async getInboxEmailsRest(emailCount: number, cutoffDate: Date): Promise<any[]> {
+                return new Promise((resolve, reject) => {
+                        Office.context.mailbox.makeEwsRequestAsync(
+                                this.buildGetInboxEmailsRequest(emailCount, cutoffDate),
+                                (result) => {
+                                        if (result.status === Office.AsyncResultStatus.Succeeded) {
+                                                try {
+                                                        const response = result.value;
+                                                        const emails = this.parseSentEmailsResponse(response); // same parsing logic applies
+                                                        resolve(emails);
+                                                } catch (error) {
+                                                        reject(error);
+                                                }
+                                        } else {
+                                                reject(new Error(result.error?.message || 'Failed to get inbox emails'));
+                                        }
+                                }
+                        );
+                });
+        }
+
+        private buildGetInboxEmailsRequest(emailCount: number, cutoffDate: Date): string {
+                const cutoffDateISO = cutoffDate.toISOString();
+                return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
+                             xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
+                             xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Header>
+        <t:RequestServerVersion Version="Exchange2013" />
+    </soap:Header>
+    <soap:Body>
+        <m:FindItem Traversal="Shallow">
+            <m:ItemShape>
+                <t:BaseShape>IdOnly</t:BaseShape>
+                <t:AdditionalProperties>
+                    <t:FieldURI FieldURI="item:Subject" />
+                    <t:FieldURI FieldURI="item:DateTimeSent" />
+                    <t:FieldURI FieldURI="message:ToRecipients" />
+                    <t:FieldURI FieldURI="message:From" />
+                    <t:FieldURI FieldURI="item:Body" />
+                    <t:FieldURI FieldURI="conversation:ConversationId" />
+                </t:AdditionalProperties>
+            </m:ItemShape>
+            <m:IndexedPageItemView MaxEntriesReturned="${emailCount}" Offset="0" BasePoint="Beginning" />
+            <m:Restriction>
+                <t:And>
+                    <t:IsGreaterThan>
+                        <t:FieldURI FieldURI="item:DateTimeSent" />
+                        <t:FieldURIOrConstant>
+                            <t:Constant Value="${cutoffDateISO}" />
+                        </t:FieldURIOrConstant>
+                    </t:IsGreaterThan>
+                </t:And>
+            </m:Restriction>
+            <m:ParentFolderIds>
+                <t:DistinguishedFolderId Id="inbox" />
+            </m:ParentFolderIds>
+        </m:FindItem>
+    </soap:Body>
+</soap:Envelope>`;
+        }
 
     private async processConversationWithCaching(
         conversationId: string, 

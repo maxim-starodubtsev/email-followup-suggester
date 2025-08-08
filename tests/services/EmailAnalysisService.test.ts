@@ -636,6 +636,64 @@ describe('EmailAnalysisService', () => {
         expect(result).not.toBeNull();
         expect(result.accountEmail).toBe('USER@EXAMPLE.COM');
       });
+
+      it('should only show threads where user is last sender across folders (multi-folder)', async () => {
+        // Simulate a thread where user sent last message (needs followup)
+        const threadNeedingFollowup: ThreadMessage[] = [
+          { id: 'a1', subject: 'Need Info', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Question', isFromCurrentUser: false },
+          { id: 'a2', subject: 'Re: Need Info', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-21T10:00:00Z'), body: 'Answer provided', isFromCurrentUser: true }
+        ];
+        // Simulate a thread where client responded after user (should be excluded)
+        const threadAlreadyAnswered: ThreadMessage[] = [
+          { id: 'b1', subject: 'Status', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Any update?', isFromCurrentUser: true },
+              { id: 'b2', subject: 'Re: Status', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-22T10:00:00Z'), body: 'We are good.', isFromCurrentUser: false }
+        ];
+
+        jest.spyOn(service as any, 'getConversationThreadCached')
+          .mockImplementation(async (...args: any[]) => {
+            const id = args[0] as string;
+            return id.startsWith('a') ? threadNeedingFollowup : threadAlreadyAnswered;
+          });
+        jest.spyOn(service as any, 'createFollowupEmailEnhanced')
+          .mockImplementation(async (...args: any[]) => {
+            const lastMessage = args[0] as ThreadMessage;
+            const thread = args[1] as ThreadMessage[];
+            return {
+              id: lastMessage.id,
+              subject: lastMessage.subject,
+              recipients: lastMessage.to,
+              sentDate: lastMessage.sentDate,
+              body: lastMessage.body,
+              summary: lastMessage.body,
+              priority: 'low' as const,
+              daysWithoutResponse: 1,
+              conversationId: 'conv-' + lastMessage.id,
+              hasAttachments: false,
+              accountEmail: lastMessage.from,
+              threadMessages: thread,
+              isSnoozed: false,
+              isDismissed: false
+            };
+          });
+
+        // Directly invoke two conversations
+        const res1 = await (service as any).processConversationWithCaching('conv-a', [{ id: 'a1' }], 'user@example.com', []);
+        const res2 = await (service as any).processConversationWithCaching('conv-b', [{ id: 'b1' }], 'user@example.com', []);
+
+        expect(res1).not.toBeNull();
+        expect(res1.id).toBe('a2');
+        expect(res2).toBeNull();
+      });
+
+      it('should not include sent items that already got an answer from other user (requirement)', async () => {
+        const answeredThread: ThreadMessage[] = [
+          { id: 'c1', subject: 'Ping', from: 'user@example.com', to: ['peer@example.com'], sentDate: new Date('2025-01-20T09:00:00Z'), body: 'Ping', isFromCurrentUser: true },
+          { id: 'c2', subject: 'Re: Ping', from: 'peer@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Pong', isFromCurrentUser: false }
+        ];
+        jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue(answeredThread);
+        const result = await (service as any).processConversationWithCaching('conv-c', [{ id: 'c1' }], 'user@example.com', []);
+        expect(result).toBeNull();
+      });
     });
 
     describe('Enhanced Thread Retrieval', () => {
