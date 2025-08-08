@@ -657,8 +657,12 @@ export class TaskpaneManager {
             return;
         }
 
-        this.emailListDiv.innerHTML = '';
-        emails.forEach(email => {
+    // Requirement: always display most recent emails first (newest -> oldest)
+    // Even if analysis service internally sorts by priority, we enforce recency ordering for UI display.
+    const recentFirst = [...emails].sort((a, b) => b.sentDate.getTime() - a.sentDate.getTime());
+
+    this.emailListDiv.innerHTML = '';
+    recentFirst.forEach(email => {
             const emailElement = this.createEmailElement(email);
             this.emailListDiv.appendChild(emailElement);
         });
@@ -792,10 +796,20 @@ export class TaskpaneManager {
                 subject = `Re: ${subject}`;
             }
 
-            // Basic quoted body (can't rely on Outlook automatic quoting since we're constructing new form)
+            // Preserve original HTML formatting when available.
+            const rawBody = lastMessage.body || '';
+            const looksHtml = /<\w+[^>]*>/.test(rawBody); // crude check for existing HTML tags
+            let sanitizedBody = rawBody;
+            if (!looksHtml) {
+                // Convert plain text newlines to <br> for readability
+                sanitizedBody = this.escapeHtml(rawBody).replace(/\n/g, '<br>');
+            } else {
+                // Minimal sanitization: strip any script/style tags for safety
+                sanitizedBody = rawBody.replace(/<script[\s\S]*?<\/script>/gi, '')
+                                       .replace(/<style[\s\S]*?<\/style>/gi, '');
+            }
             const quotedSeparator = '<br><br>----- Original Message -----<br>';
-            const safeBody = this.escapeHtml(lastMessage.body || '');
-            const htmlBody = `<br><br>${quotedSeparator}${safeBody}`;
+            const htmlBody = `<br><br>${quotedSeparator}${sanitizedBody}`;
 
             Office.context.mailbox.displayNewMessageForm({
                 toRecipients,
@@ -827,9 +841,17 @@ export class TaskpaneManager {
             if (!/^fw:|^fwd:/i.test(subject)) {
                 subject = `FW: ${subject}`; // Outlook commonly uses FW:
             }
+            const rawBody = lastMessage.body || '';
+            const looksHtml = /<\w+[^>]*>/.test(rawBody);
+            let sanitizedBody = rawBody;
+            if (!looksHtml) {
+                sanitizedBody = this.escapeHtml(rawBody).replace(/\n/g, '<br>');
+            } else {
+                sanitizedBody = rawBody.replace(/<script[\s\S]*?<\/script>/gi, '')
+                                       .replace(/<style[\s\S]*?<\/style>/gi, '');
+            }
             const quotedSeparator = '<br><br>----- Forwarded Message -----<br>';
-            const safeBody = this.escapeHtml(lastMessage.body || '');
-            const htmlBody = `<br><br>${quotedSeparator}${safeBody}`;
+            const htmlBody = `<br><br>${quotedSeparator}${sanitizedBody}`;
 
             Office.context.mailbox.displayNewMessageForm({
                 toRecipients: [], // user will choose
