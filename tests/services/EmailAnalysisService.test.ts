@@ -182,6 +182,7 @@ describe('EmailAnalysisService', () => {
       };
 
       const followupEmail = await (service as any).createFollowupEmailEnhanced(
+        'conv-ai-1',
         mockLastMessage,
         [mockLastMessage],
         'test@example.com'
@@ -206,6 +207,7 @@ describe('EmailAnalysisService', () => {
       };
 
       const followupEmail = await (service as any).createFollowupEmailEnhanced(
+        'conv-ai-2',
         mockLastMessage,
         [mockLastMessage],
         'test@example.com'
@@ -656,8 +658,8 @@ describe('EmailAnalysisService', () => {
           });
         jest.spyOn(service as any, 'createFollowupEmailEnhanced')
           .mockImplementation(async (...args: any[]) => {
-            const lastMessage = args[0] as ThreadMessage;
-            const thread = args[1] as ThreadMessage[];
+            const lastMessage = args[1] as ThreadMessage;
+            const thread = args[2] as ThreadMessage[];
             return {
               id: lastMessage.id,
               subject: lastMessage.subject,
@@ -693,6 +695,31 @@ describe('EmailAnalysisService', () => {
         jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue(answeredThread);
         const result = await (service as any).processConversationWithCaching('conv-c', [{ id: 'c1' }], 'user@example.com', []);
         expect(result).toBeNull();
+      });
+    });
+
+    describe('Dedupe Followup Emails', () => {
+      it('should keep only the latest followup per conversation', () => {
+        const now = new Date();
+        const earlier = new Date(now.getTime() - 60_000);
+        const followups = [
+          { id: 'm1', subject: 'Subj', recipients: ['a@b.com'], sentDate: earlier, body: '1', summary: '1', priority: 'low' as const, daysWithoutResponse: 1, conversationId: 'convX', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false },
+          { id: 'm2', subject: 'Subj', recipients: ['a@b.com'], sentDate: now, body: '2', summary: '2', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'convX', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false }
+        ];
+        const deduped = (service as any).dedupeFollowupEmails(followups);
+        expect(deduped).toHaveLength(1);
+        expect(deduped[0].id).toBe('m2');
+      });
+
+      it('should fallback to composite key when conversationId missing', () => {
+        const now = new Date();
+        const fups = [
+          { id: 'x1', subject: 'Topic', recipients: ['r@e.com'], sentDate: now, body: 'A', summary: 'A', priority: 'low' as const, daysWithoutResponse: 0, conversationId: '', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false },
+          { id: 'x2', subject: 'Topic', recipients: ['r@e.com'], sentDate: new Date(now.getTime() - 5000), body: 'B', summary: 'B', priority: 'low' as const, daysWithoutResponse: 0, conversationId: '', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false }
+        ];
+        const deduped = (service as any).dedupeFollowupEmails(fups);
+        expect(deduped).toHaveLength(1);
+        expect(['x1']).toContain(deduped[0].id); // latest kept
       });
     });
 

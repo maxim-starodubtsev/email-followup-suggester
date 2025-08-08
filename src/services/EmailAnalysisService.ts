@@ -140,8 +140,11 @@ export class EmailAnalysisService {
             );
 
             // Filter out null results and collect successful followup emails
-            const followupEmails: FollowupEmail[] = batchResult.results
+            let followupEmails: FollowupEmail[] = batchResult.results
                 .filter((result): result is FollowupEmail => result !== null);
+
+            // Dedupe by conversation to avoid multiple entries from same thread
+            followupEmails = this.dedupeFollowupEmails(followupEmails);
 
             console.log(`[DEBUG] Final result: ${followupEmails.length} emails need followup out of ${recentEmails.length} retrieved emails`);
             
@@ -320,7 +323,7 @@ export class EmailAnalysisService {
     }
 
         // NEW: Retrieve recent emails from multiple folders (sent + inbox) to evaluate threads globally
-        private async getRecentEmailsWithCaching(emailCount: number, cutoffDate: Date): Promise<any[]> {
+    private async getRecentEmailsWithCaching(emailCount: number, cutoffDate: Date): Promise<any[]> {
                 const cacheKey = this.generateCacheKey('recent_emails', { emailCount, cutoffDate: cutoffDate.toISOString() });
                 const cached = this.cacheService.get<any[]>(cacheKey);
                 if (cached) {
@@ -330,12 +333,14 @@ export class EmailAnalysisService {
                 this.trackAnalyticsEvent('cache_miss', { type: 'recent_emails' });
 
                 // Fetch from both Sent Items and Inbox (could be extended further later)
+                // Fetch full requested count from each folder, then merge & trim.
+                // Rationale: splitting count 50/50 caused missed threads when items were moved between folders.
                 const [sent, inbox] = await this.withRetry(
-                        async () => Promise.all([
-                                this.getSentEmailsRest(Math.ceil(emailCount / 2), cutoffDate),
-                                this.getInboxEmailsRest(Math.ceil(emailCount / 2), cutoffDate)
-                        ]),
-                        this.DEFAULT_RETRY_OPTIONS
+                    async () => Promise.all([
+                        this.getSentEmailsRest(emailCount, cutoffDate),
+                        this.getInboxEmailsRest(emailCount, cutoffDate)
+                    ]),
+                    this.DEFAULT_RETRY_OPTIONS
                 );
 
             // Fallback: if inbox returns nothing, reuse legacy sent emails logic (ensures legacy method referenced)
@@ -509,7 +514,7 @@ export class EmailAnalysisService {
         console.log(`[DEBUG] ✅ PASSED: Snooze/dismiss filter`);
         console.log(`[DEBUG] 🎯 CREATING FOLLOWUP EMAIL for conversation ${conversationId}`);
 
-        const followupEmail = await this.createFollowupEmailEnhanced(lastMessage, threadMessages, currentUserEmail);
+    const followupEmail = await this.createFollowupEmailEnhanced(conversationId, lastMessage, threadMessages, currentUserEmail);
         
         // Cache the analysis result
         this.cacheService.set(cacheKey, followupEmail);
@@ -910,6 +915,7 @@ export class EmailAnalysisService {
     }
 
     private async createFollowupEmailEnhanced(
+        conversationId: string,
         lastMessage: ThreadMessage, 
         threadMessages: ThreadMessage[], 
         currentUserEmail: string
@@ -956,7 +962,7 @@ export class EmailAnalysisService {
             summary: llmSummary || this.generateSummary(lastMessage.body, lastMessage.subject),
             priority,
             daysWithoutResponse: daysSinceSent,
-            conversationId: lastMessage.id,
+            conversationId: conversationId,
             hasAttachments: false,
             accountEmail: lastMessage.from,
             threadMessages,
@@ -1021,6 +1027,21 @@ export class EmailAnalysisService {
             // Tertiary sort by date
             return b.sentDate.getTime() - a.sentDate.getTime();
         });
+    }
+
+    // Remove duplicate followup emails representing same conversation/thread. Keep newest sentDate.
+    private dedupeFollowupEmails(followups: FollowupEmail[]): FollowupEmail[] {
+        const map = new Map<string, FollowupEmail>();
+        for (const f of followups) {
+            const key = (f.conversationId && f.conversationId !== f.id)
+                ? f.conversationId
+                : `${(f.conversationId || '').toLowerCase()}|${f.subject.toLowerCase()}|${[...f.recipients].sort().join(';')}`;
+            const existing = map.get(key);
+            if (!existing || existing.sentDate < f.sentDate) {
+                map.set(key, f);
+            }
+        }
+        return Array.from(map.values());
     }
 
     private async withRetry<T>(

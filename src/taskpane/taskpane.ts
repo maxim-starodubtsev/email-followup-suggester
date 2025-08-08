@@ -292,6 +292,21 @@ class TaskpaneManager {
             if (config.llmApiEndpoint && config.llmApiKey) {
                 this.llmService = new LlmService(config, this.retryService);
                 this.emailAnalysisService.setLlmService(this.llmService);
+                // Perform availability check unless user manually disabled AI
+                const aiDisabled = localStorage.getItem('aiDisabled') === 'true';
+                if (!aiDisabled) {
+                    try {
+                        const healthy = await this.llmService.healthCheck();
+                        if (!healthy) {
+                            localStorage.setItem('aiDisabled', 'true');
+                            this.showStatus('AI service unreachable – continuing without AI features. You can re-enable later in Settings.', 'error');
+                        }
+                    } catch (hcErr) {
+                        console.warn('LLM health check error:', hcErr);
+                        localStorage.setItem('aiDisabled', 'true');
+                        this.showStatus('AI service check failed – AI features disabled for this session.', 'error');
+                    }
+                }
             }
             
             // Populate snooze options
@@ -704,23 +719,107 @@ class TaskpaneManager {
     }
 
     private async replyToEmail(_emailId: string): Promise<void> {
-        // Use Office.js to compose a reply
-        Office.context.mailbox.displayNewMessageForm({
-            toRecipients: [], // Will be populated based on original email
-            subject: 'Re: ',
-            htmlBody: '<br><br>',
-            attachments: []
-        });
+        try {
+            const email = this.allEmails.find(e => e.id === _emailId);
+            if (!email) {
+                console.warn('Email not found for reply', _emailId);
+                return;
+            }
+            if (!email.threadMessages || email.threadMessages.length === 0) {
+                console.warn('No thread messages available for reply', _emailId);
+                return;
+            }
+
+            // Assume last element is most recent; if not, sort by sentDate
+            const lastMessage = email.threadMessages[email.threadMessages.length - 1];
+            const currentUser = Office?.context?.mailbox?.userProfile?.emailAddress?.toLowerCase();
+
+            // Build Reply All recipient lists (approximation; model lacks explicit CC list)
+            const unique = new Set<string>();
+            const toRecipients: string[] = [];
+            const ccRecipients: string[] = [];
+
+            const addRecipient = (addr: string | undefined | null, list: string[]) => {
+                if (!addr) return;
+                const norm = addr.trim();
+                if (!norm) return;
+                const lower = norm.toLowerCase();
+                if (currentUser && lower === currentUser) return; // exclude self
+                if (unique.has(lower)) return;
+                unique.add(lower);
+                list.push(norm);
+            };
+
+            // Put original sender in To if it's not current user
+            addRecipient(lastMessage.from, toRecipients);
+
+            // Other original recipients go to CC (excluding current user & sender)
+            lastMessage.to.forEach(addr => {
+                const lower = addr.toLowerCase();
+                if (lastMessage.from && lower === lastMessage.from.toLowerCase()) return;
+                addRecipient(addr, ccRecipients);
+            });
+
+            // Fallback: if no To recipients (e.g., user was original sender), try using first non-user original recipient
+            if (toRecipients.length === 0 && ccRecipients.length > 0) {
+                toRecipients.push(ccRecipients.shift()!);
+            }
+
+            // Subject handling – prefix Re: if not already present
+            let subject = lastMessage.subject || email.subject || '';
+            if (!/^re:/i.test(subject)) {
+                subject = `Re: ${subject}`;
+            }
+
+            // Basic quoted body (can't rely on Outlook automatic quoting since we're constructing new form)
+            const quotedSeparator = '<br><br>----- Original Message -----<br>';
+            const safeBody = this.escapeHtml(lastMessage.body || '');
+            const htmlBody = `<br><br>${quotedSeparator}${safeBody}`;
+
+            Office.context.mailbox.displayNewMessageForm({
+                toRecipients,
+                ccRecipients,
+                subject,
+                htmlBody,
+                attachments: []
+            });
+        } catch (err) {
+            console.error('Error composing reply all form', err);
+            this.showStatus('Failed to open reply window', 'error');
+        }
     }
 
     private async forwardEmail(_emailId: string): Promise<void> {
-        // Use Office.js to compose a forward
-        Office.context.mailbox.displayNewMessageForm({
-            toRecipients: [],
-            subject: 'Fwd: ',
-            htmlBody: '<br><br>',
-            attachments: []
-        });
+        try {
+            const email = this.allEmails.find(e => e.id === _emailId);
+            if (!email) {
+                console.warn('Email not found for forward', _emailId);
+                return;
+            }
+            if (!email.threadMessages || email.threadMessages.length === 0) {
+                console.warn('No thread messages available for forward', _emailId);
+                return;
+            }
+
+            const lastMessage = email.threadMessages[email.threadMessages.length - 1];
+            let subject = lastMessage.subject || email.subject || '';
+            if (!/^fw:|^fwd:/i.test(subject)) {
+                subject = `FW: ${subject}`; // Outlook commonly uses FW:
+            }
+            const quotedSeparator = '<br><br>----- Forwarded Message -----<br>';
+            const safeBody = this.escapeHtml(lastMessage.body || '');
+            const htmlBody = `<br><br>${quotedSeparator}${safeBody}`;
+
+            Office.context.mailbox.displayNewMessageForm({
+                toRecipients: [], // user will choose
+                subject,
+                htmlBody,
+                attachments: []
+            });
+        } catch (err) {
+            console.error('Error composing forward form', err);
+            this.showStatus('Failed to open forward window', 'error');
+        }
     }
 
     // Modal management methods

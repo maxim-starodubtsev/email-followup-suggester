@@ -127,6 +127,22 @@ Just return the classification word, nothing else.`;
         }
     }
 
+    // Lightweight availability check – attempts a minimal completion.
+    public async healthCheck(timeoutMs = 6000): Promise<boolean> {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            // Use a tiny prompt to minimize cost. Provider-specific logic happens in makeApiCall.
+            const response = await this.callLlmApi('Return the word OK', { maxTokens: 5 });
+            return /\bOK\b/i.test(response.content.trim());
+        } catch (e) {
+            console.warn('[LLM HealthCheck] Failed:', (e as Error).message);
+            return false;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     private async callLlmApi(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
         const retryOptions: RetryOptions = {
             maxAttempts: 3,
