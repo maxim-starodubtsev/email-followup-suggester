@@ -450,7 +450,25 @@ export class EmailAnalysisService {
         
         console.log(`[DEBUG] Processing conversation ${conversationId} with email ID ${emailItemId}`);
         
-        const threadMessages = await this.getConversationThreadCached(emailItemId);
+        // Prefer using conversation APIs (GetConversationItems) then fallback paths
+        let threadMessages: ThreadMessage[] = [];
+    if (conversationId && this.isEwsAvailable()) {
+            try {
+                threadMessages = await this.getConversationItemsConversationCached(conversationId);
+            } catch (e) {
+                console.warn('[WARN] GetConversationItems retrieval failed, will try folder-based search', e);
+            }
+        }
+    if (threadMessages.length === 0 && conversationId && this.isEwsAvailable()) {
+            try {
+                threadMessages = await this.getConversationThreadFromConversationIdCached(conversationId);
+            } catch (e) {
+                console.warn('[WARN] Folder multi-find retrieval failed, will fallback to item-based', e);
+            }
+        }
+        if (threadMessages.length === 0) {
+            threadMessages = await this.getConversationThreadCached(emailItemId);
+        }
         console.log(`[DEBUG] Retrieved ${threadMessages.length} thread messages for conversation ${conversationId}`);
         
         // Log all messages in the thread for debugging
@@ -541,6 +559,179 @@ export class EmailAnalysisService {
         // Cache thread data for 20 minutes
         this.cacheService.set(cacheKey, thread, 20 * 60 * 1000);
         return thread;
+    }
+
+    // New: conversationId-based cached retrieval (skips GetItem + fragile parse).
+    private async getConversationThreadFromConversationIdCached(conversationId: string): Promise<ThreadMessage[]> {
+    if (!this.isEwsAvailable()) return [];
+        const cacheKey = this.generateCacheKey('threadConv', conversationId);
+        const cached = this.cacheService.get<ThreadMessage[]>(cacheKey);
+        if (cached) {
+            this.trackAnalyticsEvent('cache_hit', { type: 'threadConv' });
+            return cached;
+        }
+        this.trackAnalyticsEvent('cache_miss', { type: 'threadConv' });
+        const messages = await this.withRetry(
+            () => this.searchConversationAcrossFolders(conversationId),
+            this.DEFAULT_RETRY_OPTIONS
+        );
+        this.cacheService.set(cacheKey, messages, 20 * 60 * 1000);
+        return messages;
+    }
+
+    // New: GetConversationItems-based retrieval + cache
+    private async getConversationItemsConversationCached(conversationId: string): Promise<ThreadMessage[]> {
+    if (!this.isEwsAvailable()) return [];
+        const cacheKey = this.generateCacheKey('convItems', conversationId);
+        const cached = this.cacheService.get<ThreadMessage[]>(cacheKey);
+        if (cached) {
+            this.trackAnalyticsEvent('cache_hit', { type: 'convItems' });
+            return cached;
+        }
+        this.trackAnalyticsEvent('cache_miss', { type: 'convItems' });
+        const messages = await this.withRetry(
+            () => this.getConversationItems(conversationId),
+            this.DEFAULT_RETRY_OPTIONS
+        );
+        this.cacheService.set(cacheKey, messages, 20 * 60 * 1000);
+        return messages;
+    }
+
+    private buildGetConversationItemsRequest(conversationId: string, maxItems = 250): string {
+        // Using shallow to respect folder boundaries but conversation API returns nodes.
+        // Optionally FoldersToIgnore could list drafts/deleteditems if filtering earlier.
+        return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2013" />
+  </soap:Header>
+  <soap:Body>
+    <m:GetConversationItems ReturnSynchronizationCookie="false">
+      <m:ItemShape>
+        <t:BaseShape>IdOnly</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Subject" />
+          <t:FieldURI FieldURI="item:DateTimeSent" />
+          <t:FieldURI FieldURI="item:DateTimeReceived" />
+          <t:FieldURI FieldURI="message:ToRecipients" />
+          <t:FieldURI FieldURI="message:From" />
+          <t:FieldURI FieldURI="item:Body" />
+          <t:FieldURI FieldURI="conversation:ConversationId" />
+          <t:FieldURI FieldURI="item:HasAttachments" />
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:FoldersToIgnore>
+        <t:DistinguishedFolderId Id="drafts" />
+        <t:DistinguishedFolderId Id="deleteditems" />
+      </m:FoldersToIgnore>
+            <m:MaxItemsToReturn>${maxItems}</m:MaxItemsToReturn>
+      <m:ConversationIds>
+        <t:ConversationId Id="${conversationId}" />
+      </m:ConversationIds>
+    </m:GetConversationItems>
+  </soap:Body>
+</soap:Envelope>`;
+    }
+
+    private async getConversationItems(conversationId: string): Promise<ThreadMessage[]> {
+        return new Promise((resolve, reject) => {
+            Office.context.mailbox.makeEwsRequestAsync(
+                this.buildGetConversationItemsRequest(conversationId),
+                (result) => {
+                    if (result.status === Office.AsyncResultStatus.Succeeded) {
+                        try {
+                            const messages = this.parseGetConversationItemsResponse(result.value);
+                            resolve(messages);
+                        } catch (e) {
+                            reject(e);
+                        }
+                    } else {
+                        reject(new Error(result.error?.message || 'GetConversationItems failed'));
+                    }
+                }
+            );
+        });
+    }
+
+    private parseGetConversationItemsResponse(xml: string): ThreadMessage[] {
+    const currentUserEmail = Office.context.mailbox.userProfile.emailAddress.toLowerCase();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xml, 'text/xml');
+        const messages: ThreadMessage[] = [];
+
+        // ConversationNodes can contain one or more Items (Message, MeetingRequest, etc.)
+        const nodeLists = doc.getElementsByTagNameNS('*', 'ConversationNode');
+        for (let i = 0; i < nodeLists.length; i++) {
+            const node = nodeLists[i];
+            const itemNodes = node.getElementsByTagNameNS('*', 'Message');
+            for (let j = 0; j < itemNodes.length; j++) {
+                const item = itemNodes[j];
+                const idEl = item.getElementsByTagNameNS('*', 'ItemId')[0];
+                const subjEl = item.getElementsByTagNameNS('*', 'Subject')[0];
+                const sentEl = item.getElementsByTagNameNS('*', 'DateTimeSent')[0];
+                const recvEl = item.getElementsByTagNameNS('*', 'DateTimeReceived')[0];
+                const fromEmail = this.extractEmailAddress(item.getElementsByTagNameNS('*', 'From')[0]);
+                const toEmails = this.extractMultipleAddresses(item.getElementsByTagNameNS('*', 'ToRecipients')[0]);
+                const bodyEl = item.getElementsByTagNameNS('*', 'Body')[0];
+
+                if (!idEl) continue;
+                const id = idEl.getAttribute('Id') || idEl.textContent || '';
+                const sentDate = sentEl ? new Date(sentEl.textContent || '') : new Date();
+                const receivedDate = recvEl ? new Date(recvEl.textContent || '') : undefined;
+                const from = fromEmail || '';
+                const subj = subjEl?.textContent || '';
+                const body = bodyEl?.textContent || '';
+                const isFromCurrentUser = from.toLowerCase() === currentUserEmail;
+
+                messages.push({
+                    id,
+                    subject: subj,
+                    from,
+                    to: toEmails,
+                    sentDate,
+                    receivedDate,
+                    body,
+                    isFromCurrentUser
+                });
+            }
+        }
+
+        // Sort chronologically by receivedDate if available else sentDate
+        messages.sort((a, b) => {
+            const aTime = (a.receivedDate || a.sentDate).getTime();
+            const bTime = (b.receivedDate || b.sentDate).getTime();
+            return aTime - bTime;
+        });
+        return messages;
+    }
+
+    private extractEmailAddress(container?: Element | null): string | undefined {
+        if (!container) return undefined;
+        const addr = container.getElementsByTagNameNS('*', 'EmailAddress')[0];
+        if (addr?.textContent) return addr.textContent.trim();
+        const addressNode = container.getElementsByTagNameNS('*', 'Address')[0];
+        return addressNode?.textContent?.trim();
+    }
+
+    private extractMultipleAddresses(container?: Element | null): string[] {
+        if (!container) return [];
+        const emails: string[] = [];
+        const mailboxes = container.getElementsByTagNameNS('*', 'Mailbox');
+        for (let i = 0; i < mailboxes.length; i++) {
+            const e = this.extractEmailAddress(mailboxes[i]);
+            if (e) emails.push(e);
+        }
+        return emails;
+    }
+
+    private isEwsAvailable(): boolean {
+        try {
+            return typeof (Office as any)?.context?.mailbox?.makeEwsRequestAsync === 'function';
+        } catch {
+            return false;
+        }
     }
 
     private generateCacheKey(prefix: string, data: any): string {
@@ -821,15 +1012,18 @@ export class EmailAnalysisService {
             console.log(`[DEBUG] ❌ EMPTY THREAD: No messages in thread`);
             return null;
         }
-        
-        // Sort messages by date and get the latest one
-        const sortedMessages = [...threadMessages].sort((a, b) => b.sentDate.getTime() - a.sentDate.getTime());
+        // Determine most recent using receivedDate when present (fallback to sentDate)
+        const sortedMessages = [...threadMessages].sort((a, b) => {
+            const at = (a.receivedDate || a.sentDate).getTime();
+            const bt = (b.receivedDate || b.sentDate).getTime();
+            return bt - at;
+        });
         const lastMessage = sortedMessages[0];
         
         console.log(`[DEBUG] 🏁 LAST MESSAGE IDENTIFIED:`);
         console.log(`[DEBUG]   From: "${lastMessage.from}" (${lastMessage.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'})`);
         console.log(`[DEBUG]   Subject: "${lastMessage.subject}"`);
-        console.log(`[DEBUG]   Date: ${lastMessage.sentDate.toISOString()}`);
+        console.log(`[DEBUG]   Date: ${(lastMessage.receivedDate || lastMessage.sentDate).toISOString()} (received vs sent basis)`);
         console.log(`[DEBUG]   Thread size: ${threadMessages.length} messages`);
         
         return lastMessage;
@@ -844,9 +1038,10 @@ export class EmailAnalysisService {
         
         console.log(`[DEBUG] Chronological message order:`);
         sortedMessages.forEach((message, index) => {
-            const timeStatus = message.sentDate > lastSentDate ? 'AFTER' : 'BEFORE';
+            const baseDate = (message.receivedDate || message.sentDate);
+            const timeStatus = baseDate > lastSentDate ? 'AFTER' : 'BEFORE';
             const userStatus = message.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER';
-            console.log(`[DEBUG]   ${index + 1}. ${timeStatus} last sent: ${userStatus} at ${message.sentDate.toISOString()}`);
+            console.log(`[DEBUG]   ${index + 1}. ${timeStatus} last sent: ${userStatus} at ${baseDate.toISOString()}`);
         });
         
         // Find all messages after the last sent date that are not from current user
@@ -1351,15 +1546,22 @@ export class EmailAnalysisService {
         try {
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
-            
-            const conversationIdElements = xmlDoc.getElementsByTagName('t:ConversationId');
-            if (conversationIdElements.length > 0) {
-                const conversationId = conversationIdElements[0].getAttribute('Id');
+
+            // Strategy: namespace-agnostic search for element whose localName == ConversationId
+            let conversationId: string | null = null;
+            const allElements = xmlDoc.getElementsByTagName('*');
+            for (let i = 0; i < allElements.length; i++) {
+                const el = allElements[i];
+                if (el.localName === 'ConversationId') {
+                    conversationId = el.getAttribute('Id');
+                    if (conversationId) break;
+                }
+            }
+            if (conversationId) {
                 console.log(`[DEBUG] Found conversation ID: ${conversationId}`);
                 return conversationId;
             }
-            
-            console.log(`[DEBUG] No conversation ID found in response`);
+            console.log('[DEBUG] No conversation ID found in response (namespace-agnostic search)');
             return null;
         } catch (error) {
             console.error(`[ERROR] Failed to parse conversation ID response:`, error);

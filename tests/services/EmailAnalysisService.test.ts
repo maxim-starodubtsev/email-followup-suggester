@@ -925,5 +925,67 @@ describe('EmailAnalysisService', () => {
         mockRemoveDuplicateMessages.mockRestore();
       });
     });
+
+    describe('ConversationId-first Retrieval Path', () => {
+      let ewsSpy: jest.SpyInstance;
+      beforeEach(() => {
+        ewsSpy = jest.spyOn(service as any, 'isEwsAvailable').mockReturnValue(true);
+      });
+      afterEach(() => {
+        ewsSpy.mockRestore();
+      });
+
+      it('should use GetConversationItems path and skip folder/item fallbacks', async () => {
+        const convId = 'conv-use-first';
+        const thread: ThreadMessage[] = [
+          { id: 't1', subject: 'Question', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Hi', isFromCurrentUser: false },
+          { id: 't2', subject: 'Re: Question', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-21T10:00:00Z'), body: 'Answer', isFromCurrentUser: true }
+        ];
+        const spyConvItems = jest.spyOn(service as any, 'getConversationItemsConversationCached').mockResolvedValue(thread);
+        const spyFolderPath = jest.spyOn(service as any, 'getConversationThreadFromConversationIdCached').mockResolvedValue([]);
+        const spyItem = jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue([]);
+        const spyCreate = jest.spyOn(service as any, 'createFollowupEmailEnhanced').mockImplementation(async (...args: any[]) => {
+          const last: ThreadMessage = args[1];
+          const all: ThreadMessage[] = args[2];
+          return { id: last.id, subject: last.subject, recipients: last.to, sentDate: last.sentDate, body: last.body, summary: last.body, priority: 'low', daysWithoutResponse: 1, conversationId: convId, hasAttachments: false, accountEmail: last.from, threadMessages: all, isSnoozed: false, isDismissed: false };
+        });
+        const result = await (service as any).processConversationWithCaching(convId, [{ id: 'seedMessage' }], 'user@example.com', []);
+        expect(result).not.toBeNull();
+        expect(result.id).toBe('t2');
+        expect(spyConvItems).toHaveBeenCalledTimes(1);
+        expect(spyFolderPath).not.toHaveBeenCalled();
+        expect(spyItem).not.toHaveBeenCalled();
+        spyConvItems.mockRestore();
+        spyFolderPath.mockRestore();
+        spyItem.mockRestore();
+        spyCreate.mockRestore();
+      });
+
+      it('should fallback to folder then item retrieval when GetConversationItems returns empty', async () => {
+        const convId = 'conv-fallback';
+        const fallbackThread: ThreadMessage[] = [
+          { id: 'fb1', subject: 'Need Help', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T09:00:00Z'), body: 'Need info', isFromCurrentUser: false },
+          { id: 'fb2', subject: 'Re: Need Help', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Provided', isFromCurrentUser: true }
+        ];
+        const spyConvItems = jest.spyOn(service as any, 'getConversationItemsConversationCached').mockResolvedValue([]);
+        const spyFolderPath = jest.spyOn(service as any, 'getConversationThreadFromConversationIdCached').mockResolvedValue([]);
+        const spyItem = jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue(fallbackThread);
+        const spyCreate = jest.spyOn(service as any, 'createFollowupEmailEnhanced').mockImplementation(async (...args: any[]) => {
+          const last: ThreadMessage = args[1];
+          const all: ThreadMessage[] = args[2];
+          return { id: last.id, subject: last.subject, recipients: last.to, sentDate: last.sentDate, body: last.body, summary: last.body, priority: 'low', daysWithoutResponse: 1, conversationId: convId, hasAttachments: false, accountEmail: last.from, threadMessages: all, isSnoozed: false, isDismissed: false };
+        });
+        const result = await (service as any).processConversationWithCaching(convId, [{ id: 'seedMessage' }], 'user@example.com', []);
+        expect(result).not.toBeNull();
+        expect(result.id).toBe('fb2');
+        expect(spyConvItems).toHaveBeenCalledTimes(1);
+        expect(spyFolderPath).toHaveBeenCalledTimes(1);
+        expect(spyItem).toHaveBeenCalledTimes(1);
+        spyConvItems.mockRestore();
+        spyFolderPath.mockRestore();
+        spyItem.mockRestore();
+        spyCreate.mockRestore();
+      });
+    });
   });
 });

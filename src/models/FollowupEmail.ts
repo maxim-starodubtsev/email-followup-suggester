@@ -26,6 +26,7 @@ export interface ThreadMessage {
     from: string;
     to: string[];
     sentDate: Date;
+    receivedDate?: Date; // New: DateTimeReceived for accurate last-message determination
     body: string;
     isFromCurrentUser: boolean;
 }
