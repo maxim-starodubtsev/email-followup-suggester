@@ -9,6 +9,7 @@
         accountType: 'enterprise'
       },
       makeEwsRequestAsync: jest.fn()
+  ,displayNewMessageForm: jest.fn()
     },
     roamingSettings: {
       get: jest.fn(),
@@ -19,6 +20,14 @@
   AsyncResultStatus: {
     Succeeded: 'succeeded',
     Failed: 'failed'
+  },
+  // Add HostType and onReady to satisfy taskpane.ts initialization in tests
+  HostType: {
+    Outlook: 'Outlook'
+  },
+  onReady: (callback: (info: any) => void) => {
+    // Invoke immediately for unit tests
+    callback({ host: 'Outlook' });
   }
 };
 

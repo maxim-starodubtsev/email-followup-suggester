@@ -11,7 +11,7 @@ interface SnoozeOption {
     isCustom?: boolean;
 }
 
-class TaskpaneManager {
+export class TaskpaneManager {
     private emailAnalysisService: EmailAnalysisService;
     private configurationService: ConfigurationService;
     private llmService?: LlmService;
@@ -115,71 +115,92 @@ class TaskpaneManager {
     }
 
     private initializeElements(): void {
+        const safeElement = (id: string): any => {
+            const el = document.getElementById(id);
+            if (el) return el;
+            // Create a lightweight stub element for unit tests / headless environments
+            return {
+                id,
+                style: {},
+                children: [],
+                innerHTML: '',
+                value: '',
+                disabled: false,
+                checked: false,
+                textContent: '',
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                appendChild: () => {},
+                querySelector: () => null,
+                querySelectorAll: () => [],
+                classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false }
+            } as any;
+        };
         // Main controls
-        this.analyzeButton = document.getElementById('analyzeButton') as HTMLButtonElement;
-        this.refreshButton = document.getElementById('refreshButton') as HTMLButtonElement;
-        this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
-        this.emailCountSelect = document.getElementById('emailCount') as HTMLSelectElement;
-        this.daysBackSelect = document.getElementById('daysBack') as HTMLSelectElement;
-        this.accountFilterSelect = document.getElementById('accountFilter') as HTMLSelectElement;
-        this.enableLlmSummaryCheckbox = document.getElementById('enableLlmSummary') as HTMLInputElement;
-        this.enableLlmSuggestionsCheckbox = document.getElementById('enableLlmSuggestions') as HTMLInputElement;
+    this.analyzeButton = safeElement('analyzeButton') as HTMLButtonElement;
+    this.refreshButton = safeElement('refreshButton') as HTMLButtonElement;
+    this.settingsButton = safeElement('settingsButton') as HTMLButtonElement;
+    this.emailCountSelect = safeElement('emailCount') as HTMLSelectElement;
+    this.daysBackSelect = safeElement('daysBack') as HTMLSelectElement;
+    this.accountFilterSelect = safeElement('accountFilter') as HTMLSelectElement;
+    this.enableLlmSummaryCheckbox = safeElement('enableLlmSummary') as HTMLInputElement;
+    this.enableLlmSuggestionsCheckbox = safeElement('enableLlmSuggestions') as HTMLInputElement;
         
         // Display elements
-        this.statusDiv = document.getElementById('status') as HTMLDivElement;
-        this.loadingDiv = document.getElementById('loadingMessage') as HTMLDivElement;
-        this.emptyStateDiv = document.getElementById('emptyState') as HTMLDivElement;
-        this.emailListDiv = document.getElementById('emailList') as HTMLDivElement;
+    this.statusDiv = safeElement('status') as HTMLDivElement;
+    this.loadingDiv = safeElement('loadingMessage') as HTMLDivElement;
+    this.emptyStateDiv = safeElement('emptyState') as HTMLDivElement;
+    this.emailListDiv = safeElement('emailList') as HTMLDivElement;
         
         // Modal elements
-        this.snoozeModal = document.getElementById('snoozeModal') as HTMLDivElement;
-        this.settingsModal = document.getElementById('settingsModal') as HTMLDivElement;
-        this.snoozeOptionsSelect = document.getElementById('snoozeOptions') as HTMLSelectElement;
-        this.customSnoozeGroup = document.getElementById('customSnoozeGroup') as HTMLDivElement;
-        this.customSnoozeDate = document.getElementById('customSnoozeDate') as HTMLInputElement;
-        this.llmEndpointInput = document.getElementById('llmEndpoint') as HTMLInputElement;
-        this.llmApiKeyInput = document.getElementById('llmApiKey') as HTMLInputElement;
-        this.showSnoozedEmailsCheckbox = document.getElementById('showSnoozedEmails') as HTMLInputElement;
-        this.showDismissedEmailsCheckbox = document.getElementById('showDismissedEmails') as HTMLInputElement;
-        this.aiStatusDiv = document.getElementById('aiStatus') as HTMLDivElement;
-        this.aiStatusText = document.getElementById('aiStatusText') as HTMLSpanElement;
-        this.testAiConnectionButton = document.getElementById('testAiConnection') as HTMLButtonElement;
-        this.disableAiFeaturesButton = document.getElementById('disableAiFeatures') as HTMLButtonElement;
-        this.enableAiFeaturesCheckbox = document.getElementById('enableAiFeatures') as HTMLInputElement;
-        this.llmProviderSelect = document.getElementById('llmProvider') as HTMLSelectElement;
-        this.llmModelInput = document.getElementById('llmModel') as HTMLInputElement;
-        this.llmDeploymentNameInput = document.getElementById('llmDeploymentName') as HTMLInputElement;
-        this.llmApiVersionInput = document.getElementById('llmApiVersion') as HTMLInputElement;
-        this.azureSpecificOptions = document.getElementById('azureSpecificOptions') as HTMLDivElement;
+    this.snoozeModal = safeElement('snoozeModal') as HTMLDivElement;
+    this.settingsModal = safeElement('settingsModal') as HTMLDivElement;
+    this.snoozeOptionsSelect = safeElement('snoozeOptions') as HTMLSelectElement;
+    this.customSnoozeGroup = safeElement('customSnoozeGroup') as HTMLDivElement;
+    this.customSnoozeDate = safeElement('customSnoozeDate') as HTMLInputElement;
+    this.llmEndpointInput = safeElement('llmEndpoint') as HTMLInputElement;
+    this.llmApiKeyInput = safeElement('llmApiKey') as HTMLInputElement;
+    this.showSnoozedEmailsCheckbox = safeElement('showSnoozedEmails') as HTMLInputElement;
+    this.showDismissedEmailsCheckbox = safeElement('showDismissedEmails') as HTMLInputElement;
+    this.aiStatusDiv = safeElement('aiStatus') as HTMLDivElement;
+    this.aiStatusText = safeElement('aiStatusText') as HTMLSpanElement;
+    this.testAiConnectionButton = safeElement('testAiConnection') as HTMLButtonElement;
+    this.disableAiFeaturesButton = safeElement('disableAiFeatures') as HTMLButtonElement;
+    this.enableAiFeaturesCheckbox = safeElement('enableAiFeatures') as HTMLInputElement;
+    this.llmProviderSelect = safeElement('llmProvider') as HTMLSelectElement;
+    this.llmModelInput = safeElement('llmModel') as HTMLInputElement;
+    this.llmDeploymentNameInput = safeElement('llmDeploymentName') as HTMLInputElement;
+    this.llmApiVersionInput = safeElement('llmApiVersion') as HTMLInputElement;
+    this.azureSpecificOptions = safeElement('azureSpecificOptions') as HTMLDivElement;
         
         // New UI elements
-        this.statsDashboard = document.getElementById('statsDashboard') as HTMLDivElement;
-        this.showStatsButton = document.getElementById('showStatsButton') as HTMLButtonElement;
-        this.toggleStatsButton = document.getElementById('toggleStats') as HTMLButtonElement;
-        this.advancedFilters = document.getElementById('advancedFilters') as HTMLDivElement;
-        this.toggleAdvancedFiltersButton = document.getElementById('toggleAdvancedFilters') as HTMLButtonElement;
-        this.threadModal = document.getElementById('threadModal') as HTMLDivElement;
-        this.threadSubject = document.getElementById('threadSubject') as HTMLHeadingElement;
-        this.threadBody = document.getElementById('threadBody') as HTMLDivElement;
+    this.statsDashboard = safeElement('statsDashboard') as HTMLDivElement;
+    this.showStatsButton = safeElement('showStatsButton') as HTMLButtonElement;
+    this.toggleStatsButton = safeElement('toggleStats') as HTMLButtonElement;
+    this.advancedFilters = safeElement('advancedFilters') as HTMLDivElement;
+    this.toggleAdvancedFiltersButton = safeElement('toggleAdvancedFilters') as HTMLButtonElement;
+    this.threadModal = safeElement('threadModal') as HTMLDivElement;
+    this.threadSubject = safeElement('threadSubject') as HTMLHeadingElement;
+    this.threadBody = safeElement('threadBody') as HTMLDivElement;
         
         // Statistics elements
-        this.totalEmailsAnalyzedSpan = document.getElementById('totalEmailsAnalyzed') as HTMLSpanElement;
-        this.needingFollowupSpan = document.getElementById('needingFollowup') as HTMLSpanElement;
-        this.highPriorityCountSpan = document.getElementById('highPriorityCount') as HTMLSpanElement;
-        this.avgResponseTimeSpan = document.getElementById('avgResponseTime') as HTMLSpanElement;
+    this.totalEmailsAnalyzedSpan = safeElement('totalEmailsAnalyzed') as HTMLSpanElement;
+    this.needingFollowupSpan = safeElement('needingFollowup') as HTMLSpanElement;
+    this.highPriorityCountSpan = safeElement('highPriorityCount') as HTMLSpanElement;
+    this.avgResponseTimeSpan = safeElement('avgResponseTime') as HTMLSpanElement;
         
         // Filter elements
-        this.priorityFilter = document.getElementById('priorityFilter') as HTMLSelectElement;
-        this.responseTimeFilter = document.getElementById('responseTimeFilter') as HTMLSelectElement;
-        this.subjectFilter = document.getElementById('subjectFilter') as HTMLInputElement;
-        this.senderFilter = document.getElementById('senderFilter') as HTMLInputElement;
-        this.aiSuggestionFilter = document.getElementById('aiSuggestionFilter') as HTMLSelectElement;
-        this.clearFiltersButton = document.getElementById('clearFilters') as HTMLButtonElement;
+    this.priorityFilter = safeElement('priorityFilter') as HTMLSelectElement;
+    this.responseTimeFilter = safeElement('responseTimeFilter') as HTMLSelectElement;
+    this.subjectFilter = safeElement('subjectFilter') as HTMLInputElement;
+    this.senderFilter = safeElement('senderFilter') as HTMLInputElement;
+    this.aiSuggestionFilter = safeElement('aiSuggestionFilter') as HTMLSelectElement;
+    this.clearFiltersButton = safeElement('clearFilters') as HTMLButtonElement;
         
         // Progress elements
-        this.loadingStep = document.getElementById('loadingStep') as HTMLSpanElement;
-        this.loadingDetail = document.getElementById('loadingDetail') as HTMLDivElement;
-        this.progressFill = document.getElementById('progressFill') as HTMLDivElement;
+    this.loadingStep = safeElement('loadingStep') as HTMLSpanElement;
+    this.loadingDetail = safeElement('loadingDetail') as HTMLDivElement;
+    this.progressFill = safeElement('progressFill') as HTMLDivElement;
     }
 
     private attachEventListeners(): void {
@@ -1394,10 +1415,18 @@ class TaskpaneManager {
     }
 }
 
-// Initialize the task pane when Office is ready
-Office.onReady((info) => {
-    if (info.host === Office.HostType.Outlook) {
-        const taskpaneManager = new TaskpaneManager();
-        taskpaneManager.initialize().catch(console.error);
-    }
-});
+// Initialize the task pane when Office is ready (skip in test/non-DOM environments)
+if (typeof Office !== 'undefined' && typeof Office.onReady === 'function') {
+    Office.onReady((info) => {
+        try {
+            // Only auto-initialize if running in Outlook host and expected root element exists
+            if (info.host === Office.HostType.Outlook && typeof document !== 'undefined' && document.getElementById('analyzeButton')) {
+                const taskpaneManager = new TaskpaneManager();
+                taskpaneManager.initialize().catch(console.error);
+            }
+        } catch (e) {
+            // Swallow errors in headless/unit test environments
+            console.warn('Taskpane auto-initialization skipped:', e);
+        }
+    });
+}
