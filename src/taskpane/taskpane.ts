@@ -745,102 +745,97 @@ export class TaskpaneManager {
 
     private async replyToEmail(_emailId: string): Promise<void> {
         try {
+            if (!(window as any).Office || !Office.context?.mailbox) {
+                this.showStatus('Reply requires Outlook mailbox context.', 'error');
+                return;
+            }
             const email = this.allEmails.find(e => e.id === _emailId);
             if (!email) {
                 console.warn('Email not found for reply', _emailId);
                 return;
             }
-            if (!email.threadMessages || email.threadMessages.length === 0) {
+            // Preferred: open the original message to let Outlook handle Reply UX
+            if (Office.context?.mailbox?.displayMessageForm) {
+                Office.context.mailbox.displayMessageForm(email.id);
+                return;
+            }
+            // Fallback (e.g., unit tests or non-Outlook host): synthesize a Reply All compose window
+            const lastMessage = (email.threadMessages && email.threadMessages.length > 0)
+                ? email.threadMessages[email.threadMessages.length - 1]
+                : undefined;
+            if (!lastMessage) {
                 console.warn('No thread messages available for reply', _emailId);
                 return;
             }
-
-            // Assume last element is most recent; if not, sort by sentDate
-            const lastMessage = email.threadMessages[email.threadMessages.length - 1];
             const currentUser = Office?.context?.mailbox?.userProfile?.emailAddress?.toLowerCase();
-
-            // Build Reply All recipient lists (approximation; model lacks explicit CC list)
             const unique = new Set<string>();
             const toRecipients: string[] = [];
             const ccRecipients: string[] = [];
-
             const addRecipient = (addr: string | undefined | null, list: string[]) => {
                 if (!addr) return;
                 const norm = addr.trim();
                 if (!norm) return;
                 const lower = norm.toLowerCase();
-                if (currentUser && lower === currentUser) return; // exclude self
+                if (currentUser && lower === currentUser) return;
                 if (unique.has(lower)) return;
                 unique.add(lower);
                 list.push(norm);
             };
-
-            // Put original sender in To if it's not current user
             addRecipient(lastMessage.from, toRecipients);
-
-            // Other original recipients go to CC (excluding current user & sender)
             lastMessage.to.forEach(addr => {
                 const lower = addr.toLowerCase();
                 if (lastMessage.from && lower === lastMessage.from.toLowerCase()) return;
                 addRecipient(addr, ccRecipients);
             });
-
-            // Fallback: if no To recipients (e.g., user was original sender), try using first non-user original recipient
             if (toRecipients.length === 0 && ccRecipients.length > 0) {
                 toRecipients.push(ccRecipients.shift()!);
             }
-
-            // Subject handling – prefix Re: if not already present
             let subject = lastMessage.subject || email.subject || '';
-            if (!/^re:/i.test(subject)) {
-                subject = `Re: ${subject}`;
-            }
-
-            // Preserve original HTML formatting when available.
+            if (!/^re:/i.test(subject)) subject = `Re: ${subject}`;
             const rawBody = lastMessage.body || '';
-            const looksHtml = /<\w+[^>]*>/.test(rawBody); // crude check for existing HTML tags
+            const looksHtml = /<\w+[^>]*>/.test(rawBody);
             let sanitizedBody = rawBody;
             if (!looksHtml) {
-                // Convert plain text newlines to <br> for readability
                 sanitizedBody = this.escapeHtml(rawBody).replace(/\n/g, '<br>');
             } else {
-                // Minimal sanitization: strip any script/style tags for safety
                 sanitizedBody = rawBody.replace(/<script[\s\S]*?<\/script>/gi, '')
                                        .replace(/<style[\s\S]*?<\/style>/gi, '');
             }
             const quotedSeparator = '<br><br>----- Original Message -----<br>';
             const htmlBody = `<br><br>${quotedSeparator}${sanitizedBody}`;
-
-            Office.context.mailbox.displayNewMessageForm({
-                toRecipients,
-                ccRecipients,
-                subject,
-                htmlBody,
-                attachments: []
-            });
+            Office.context.mailbox.displayNewMessageForm({ toRecipients, ccRecipients, subject, htmlBody, attachments: [] });
         } catch (err) {
-            console.error('Error composing reply all form', err);
-            this.showStatus('Failed to open reply window', 'error');
+            console.error('Error opening message for reply', err);
+            this.showStatus('Failed to open message in Outlook', 'error');
         }
     }
 
     private async forwardEmail(_emailId: string): Promise<void> {
         try {
+            if (!(window as any).Office || !Office.context?.mailbox) {
+                this.showStatus('Forward requires Outlook mailbox context.', 'error');
+                return;
+            }
             const email = this.allEmails.find(e => e.id === _emailId);
             if (!email) {
                 console.warn('Email not found for forward', _emailId);
                 return;
             }
-            if (!email.threadMessages || email.threadMessages.length === 0) {
+            // Preferred: open the original message to let Outlook handle Forward UX
+            if (Office.context?.mailbox?.displayMessageForm) {
+                Office.context.mailbox.displayMessageForm(email.id);
+                return;
+            }
+            // Fallback (e.g., unit tests or non-Outlook host): synthesize a Forward compose window
+            const lastMessage = (email.threadMessages && email.threadMessages.length > 0)
+                ? email.threadMessages[email.threadMessages.length - 1]
+                : undefined;
+            if (!lastMessage) {
                 console.warn('No thread messages available for forward', _emailId);
                 return;
             }
-
-            const lastMessage = email.threadMessages[email.threadMessages.length - 1];
             let subject = lastMessage.subject || email.subject || '';
-            if (!/^fw:|^fwd:/i.test(subject)) {
-                subject = `FW: ${subject}`; // Outlook commonly uses FW:
-            }
+            if (!/^fw:|^fwd:/i.test(subject)) subject = `FW: ${subject}`;
             const rawBody = lastMessage.body || '';
             const looksHtml = /<\w+[^>]*>/.test(rawBody);
             let sanitizedBody = rawBody;
@@ -852,16 +847,10 @@ export class TaskpaneManager {
             }
             const quotedSeparator = '<br><br>----- Forwarded Message -----<br>';
             const htmlBody = `<br><br>${quotedSeparator}${sanitizedBody}`;
-
-            Office.context.mailbox.displayNewMessageForm({
-                toRecipients: [], // user will choose
-                subject,
-                htmlBody,
-                attachments: []
-            });
+            Office.context.mailbox.displayNewMessageForm({ toRecipients: [], subject, htmlBody, attachments: [] });
         } catch (err) {
-            console.error('Error composing forward form', err);
-            this.showStatus('Failed to open forward window', 'error');
+            console.error('Error opening message for forward', err);
+            this.showStatus('Failed to open message in Outlook', 'error');
         }
     }
 
