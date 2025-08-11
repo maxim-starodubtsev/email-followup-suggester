@@ -765,10 +765,14 @@ export class TaskpaneManager {
                         : undefined;
                     const referenceId = lastMsg?.id || email.id;
                     const referenceChangeKey = lastMsg?.changeKey;
-                    const draftId = await this.createReplyAllDraft(referenceId, referenceChangeKey);
-                    if (draftId) {
-                        Office.context.mailbox.displayMessageForm(draftId);
-                        return;
+                    if (this.isLikelyEwsItemId(referenceId)) {
+                        const draftId = await this.createReplyAllDraft(referenceId, referenceChangeKey);
+                        if (draftId) {
+                            Office.context.mailbox.displayMessageForm(draftId);
+                            return;
+                        }
+                    } else {
+                        console.warn('Reference ID does not look like an EWS ItemId. Skipping EWS path and using compose fallback.');
                     }
                 } catch (e) {
                     console.warn('ReplyAll draft creation failed, falling back to compose builder:', e);
@@ -817,7 +821,10 @@ export class TaskpaneManager {
                                        .replace(/<style[\s\S]*?<\/style>/gi, '');
             }
             const quotedSeparator = '<br><br>----- Original Message -----<br>';
-            const htmlBody = `<br><br>${quotedSeparator}${sanitizedBody}`;
+            // Trim to avoid OWA htmlBody parameter range issues
+            const MAX_BODY = 15000; // conservative limit to stay under host constraints
+            const bodyTrimmed = sanitizedBody.length > MAX_BODY ? sanitizedBody.slice(0, MAX_BODY) + '…' : sanitizedBody;
+            const htmlBody = `<br><br>${quotedSeparator}${bodyTrimmed}`;
             Office.context.mailbox.displayNewMessageForm({ toRecipients, ccRecipients, subject, htmlBody, attachments: [] });
         } catch (err) {
             console.error('Error opening message for reply', err);
@@ -847,11 +854,15 @@ export class TaskpaneManager {
                                             : undefined;
                                         const referenceId = lastMsg?.id || email.id;
                                         const referenceChangeKey = lastMsg?.changeKey;
-                                        const draftId = await this.createForwardDraft(referenceId, referenceChangeKey);
-                                        if (draftId) {
-                                                Office.context.mailbox.displayMessageForm(draftId);
-                                                return;
-                                        }
+                    if (this.isLikelyEwsItemId(referenceId)) {
+                        const draftId = await this.createForwardDraft(referenceId, referenceChangeKey);
+                        if (draftId) {
+                            Office.context.mailbox.displayMessageForm(draftId);
+                            return;
+                        }
+                    } else {
+                        console.warn('Reference ID does not look like an EWS ItemId. Skipping EWS path and using compose fallback.');
+                    }
                                 } catch (e) {
                                         console.warn('Forward draft creation failed, falling back to compose builder:', e);
                                 }
@@ -876,7 +887,10 @@ export class TaskpaneManager {
                                        .replace(/<style[\s\S]*?<\/style>/gi, '');
             }
             const quotedSeparator = '<br><br>----- Forwarded Message -----<br>';
-            const htmlBody = `<br><br>${quotedSeparator}${sanitizedBody}`;
+            // Trim to avoid OWA htmlBody parameter range issues
+            const MAX_BODY = 15000;
+            const bodyTrimmed = sanitizedBody.length > MAX_BODY ? sanitizedBody.slice(0, MAX_BODY) + '…' : sanitizedBody;
+            const htmlBody = `<br><br>${quotedSeparator}${bodyTrimmed}`;
             Office.context.mailbox.displayNewMessageForm({ toRecipients: [], subject, htmlBody, attachments: [] });
         } catch (err) {
             console.error('Error opening message for forward', err);
@@ -979,6 +993,13 @@ export class TaskpaneManager {
                         try {
                             const parser = new DOMParser();
                             const doc = parser.parseFromString(res.value, 'text/xml');
+                            // If EWS returned an error class, bail out
+                            const errorResp = doc.querySelector('[ResponseClass="Error"]');
+                            if (errorResp) {
+                                const code = errorResp.querySelector('ResponseCode')?.textContent || 'Unknown error';
+                                console.warn('EWS GetItem error:', code);
+                                return resolve(null);
+                            }
                             const els = doc.getElementsByTagName('*');
                             for (let i = 0; i < els.length; i++) {
                                 const el = els[i];
@@ -1002,6 +1023,15 @@ export class TaskpaneManager {
                 reject(err);
             }
         });
+    }
+
+    // Heuristic: EWS ItemIds are typically long, base64-like strings; filter out obvious synthetic ids
+    private isLikelyEwsItemId(id: string | undefined | null): boolean {
+        if (!id) return false;
+        if (id.length < 24) return false;
+        // Disallow clearly synthetic short ids used in artificial threads
+        const looksBase64ish = /^[A-Za-z0-9+/=_-]+$/.test(id);
+        return looksBase64ish;
     }
 
     private createDraftViaEws(envelope: string): Promise<string> {
