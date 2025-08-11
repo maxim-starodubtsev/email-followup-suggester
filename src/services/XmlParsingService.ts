@@ -24,6 +24,7 @@ export interface ParsedEmail {
     body: { content: string };
     from: { emailAddress: { address: string } };
     toRecipients: Array<{ emailAddress: { address: string } }>;
+    ccRecipients?: Array<{ emailAddress: { address: string } }>;
 }
 
 export interface ParsedThreadMessage {
@@ -137,7 +138,8 @@ export class XmlParsingService {
                         address: this.getNestedElementText(messageElement, ['From', 'Mailbox', 'EmailAddress']) || ''
                     } 
                 },
-                toRecipients: this.parseRecipientsList(messageElement, 'ToRecipients')
+                toRecipients: this.parseRecipientsList(messageElement, 'ToRecipients'),
+                ccRecipients: this.parseRecipientsList(messageElement, 'CcRecipients')
             };
 
             return email;

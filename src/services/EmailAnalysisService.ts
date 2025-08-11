@@ -48,6 +48,8 @@ export class EmailAnalysisService {
 
     private batchProcessor: BatchProcessor;
     private xmlParsingService: XmlParsingService;
+    // Cache of recent emails for artificial thread building in fallback mode
+    private recentEmailsContext: ParsedEmail[] = [];
 
     constructor(cacheService?: ICacheService) {
         this.batchProcessor = new BatchProcessor();
@@ -96,6 +98,8 @@ export class EmailAnalysisService {
             // This implements requirement to analyze emails across all folders
             const recentEmails = await this.getRecentEmailsWithCaching(emailCount, cutoffDate);
             console.log(`[DEBUG] Retrieved ${recentEmails.length} recent emails across folders`);
+            // Persist recent emails for use in artificial thread reconstruction (single-email fallback)
+            try { this.recentEmailsContext = recentEmails as unknown as ParsedEmail[]; } catch { this.recentEmailsContext = []; }
 
             // Group emails by conversation ID
             const conversationGroups = this.groupEmailsByConversation(recentEmails);
@@ -411,6 +415,7 @@ export class EmailAnalysisService {
                     <t:FieldURI FieldURI="item:Subject" />
                     <t:FieldURI FieldURI="item:DateTimeSent" />
                     <t:FieldURI FieldURI="message:ToRecipients" />
+                    <t:FieldURI FieldURI="message:CcRecipients" />
                     <t:FieldURI FieldURI="message:From" />
                     <t:FieldURI FieldURI="item:Body" />
                     <t:FieldURI FieldURI="conversation:ConversationId" />
@@ -469,6 +474,15 @@ export class EmailAnalysisService {
         }
         if (threadMessages.length === 0) {
             threadMessages = await this.getConversationThreadCached(emailItemId);
+        }
+        // If we only have a single message (fallback path), try to build an artificial thread by scanning recent emails
+        if (threadMessages.length <= 1) {
+            const base = threadMessages[0];
+            const artificial = this.buildArtificialThreadFromRecentEmails(base, currentUserEmail);
+            if (artificial.length > 1) {
+                console.log(`[DEBUG] 🧩 Artificial thread assembled with ${artificial.length} messages (fallback mode)`);
+                threadMessages = artificial;
+            }
         }
         console.log(`[DEBUG] Retrieved ${threadMessages.length} thread messages for conversation ${conversationId}`);
         
@@ -880,6 +894,7 @@ export class EmailAnalysisService {
           <t:FieldURI FieldURI="item:Subject" />
           <t:FieldURI FieldURI="item:DateTimeSent" />
           <t:FieldURI FieldURI="message:ToRecipients" />
+          <t:FieldURI FieldURI="message:CcRecipients" />
           <t:FieldURI FieldURI="message:From" />
           <t:FieldURI FieldURI="item:Body" />
           <t:FieldURI FieldURI="conversation:ConversationId" />
@@ -1729,5 +1744,66 @@ export class EmailAnalysisService {
             console.error(`[ERROR] 💥 MESSAGE PARSING FAILED: Failed to parse message element:`, error);
             return null;
         }
+    }
+
+    // Build an artificial thread when only a single message is available by scanning recent emails
+    // for newer messages that quote the base message body and match normalized subject.
+    private buildArtificialThreadFromRecentEmails(base: ThreadMessage | undefined, currentUserEmail: string): ThreadMessage[] {
+        if (!base) return [];
+        if (!this.recentEmailsContext || this.recentEmailsContext.length === 0) return [base];
+
+        const normSubject = this.normalizeSubject(base.subject || '');
+        const baseSig = this.normalizeBodyForMatch(base.body || '');
+        if (!baseSig || baseSig.length < 20) return [base];
+
+        const baseTime = base.sentDate.getTime();
+        const currentLower = (currentUserEmail || '').toLowerCase();
+        const baseParticipants = new Set([base.from.toLowerCase(), ...base.to.map(t => (t || '').toLowerCase())]);
+
+        const replies: ThreadMessage[] = [];
+        for (const e of this.recentEmailsContext) {
+            try {
+                const subj = this.normalizeSubject(e.subject || '');
+                if (subj !== normSubject) continue;
+                const sent = new Date(e.dateTimeSent);
+                if (!(sent instanceof Date) || isNaN(sent.getTime()) || sent.getTime() <= baseTime) continue;
+                const toList = (e.toRecipients || []).map(r => (r.emailAddress.address || '').toLowerCase());
+                const ccList = ((e as any).ccRecipients || []).map((r: any) => (r.emailAddress.address || '').toLowerCase());
+                const candRecipients = [...toList, ...ccList];
+                const overlap = candRecipients.some(addr => baseParticipants.has(addr));
+                if (!overlap && !candRecipients.includes(currentLower)) continue;
+                const body = (e.body?.content || '').toString();
+                const normBody = this.normalizeBodyForMatch(body);
+                if (!normBody || normBody.indexOf(baseSig) === -1) continue;
+                const fromAddr = (e.from?.emailAddress?.address || '').toLowerCase();
+                replies.push({
+                    id: e.id,
+                    subject: e.subject,
+                    from: fromAddr,
+                    to: (e.toRecipients || []).map(r => r.emailAddress.address),
+                    sentDate: sent,
+                    body: body,
+                    isFromCurrentUser: fromAddr === currentLower
+                });
+            } catch {
+                // ignore malformed items
+            }
+        }
+        const thread = [base, ...replies].sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
+        return thread;
+    }
+
+    private normalizeBodyForMatch(text: string): string {
+        if (!text) return '';
+        let t = text.replace(/<[^>]*>/g, ' ');
+        t = t.replace(/^>+\s?/gm, ' ')
+             .replace(/from:\s.*\n?/gi, ' ')
+             .replace(/sent:\s.*\n?/gi, ' ')
+             .replace(/subject:\s.*\n?/gi, ' ')
+             .replace(/to:\s.*\n?/gi, ' ')
+             .replace(/cc:\s.*\n?/gi, ' ');
+        t = t.replace(/\s+/g, ' ').trim().toLowerCase();
+        const maxLen = 800;
+        return t.length > maxLen ? t.slice(0, maxLen) : t;
     }
 }

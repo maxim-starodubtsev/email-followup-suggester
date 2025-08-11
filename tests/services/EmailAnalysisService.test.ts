@@ -984,6 +984,45 @@ describe('EmailAnalysisService', () => {
         mockSearchConversationInFolder.mockRestore();
         mockRemoveDuplicateMessages.mockRestore();
       });
+
+      it('should build an artificial thread from recent emails when only single message is available', async () => {
+        // Set up Office context for current user
+        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
+        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+        // Seed recent emails context mimicking FindItem results
+        (serviceLocal as any).recentEmailsContext = [
+          {
+            id: 'r1',
+            subject: 'Re: Deal Update',
+            dateTimeSent: '2025-02-01T12:01:00Z',
+            conversationId: 'other-1',
+            body: { content: 'Hi team, replying to your note: Please find details below... ORIGINAL BODY: hello client, here are details' },
+            from: { emailAddress: { address: 'client@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ],
+            ccRecipients: []
+          },
+          {
+            id: 'r2',
+            subject: 'FW: Deal Update',
+            dateTimeSent: '2025-02-01T12:03:00Z',
+            conversationId: 'other-2',
+            body: { content: 'Fwd content... ORIGINAL BODY: hello client, here are details' },
+            from: { emailAddress: { address: 'colleague@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ],
+            ccRecipients: [ { emailAddress: { address: 'client@example.com' } } ]
+          }
+        ];
+
+        const base: any = {
+          id: 'base1', subject: 'Deal Update', from: 'user@example.com', to: ['client@example.com'],
+          sentDate: new Date('2025-02-01T12:00:00Z'), body: 'Hello client, here are details', isFromCurrentUser: true
+        };
+
+        const artificial = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        expect(artificial.length).toBeGreaterThan(1);
+        // Should include r1 since it quotes the base and matches normalized subject
+        expect(artificial.some((m: any) => m.id === 'r1')).toBe(true);
+      });
     });
 
     describe('ConversationId-first Retrieval Path', () => {
