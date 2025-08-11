@@ -14,6 +14,20 @@ This document outlines a step-by-step approach to improve the Followup Suggester
 ---
 
 ## 🚀 Phase 1: Performance & Reliability
+### Step 1.5: Conversation Discovery Reliability
+**Goal**: Improve thread discovery across fragmented ConversationIds
+**Files to Create/Modify**:
+- `src/services/EmailAnalysisService.ts` (modify)
+- `tests/services/EmailAnalysisService.test.ts` (modify)
+
+**Implementation Details**:
+- Strict artificial threading via oldest→newest body-containment chain when only a single email is available (DONE)
+- Add optional EWS FindConversation as a supported fallback to locate related threads across folders (PLANNED)
+- Telemetry for artificial threading decisions (DONE)
+
+**Test Coverage**:
+- Multi-hop containment chains and broken-chain early stop (DONE)
+- Edge cases with short/noisy bodies and Cc-only overlaps (DONE)
 
 ### Step 1.1: Email Batching System
 **Goal**: Process emails in smaller batches to avoid UI blocking
