@@ -1088,6 +1088,92 @@ describe('EmailAnalysisService', () => {
       });
     });
 
+    describe('Artificial threading strict containment chain', () => {
+      it('builds a multi-hop chain A→B→C and suppresses follow-up when C is from other user', () => {
+        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
+        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+        (serviceLocal as any).recentEmailsContext = [
+          {
+            id: 'b', subject: 'Re: Quote Request', dateTimeSent: '2025-03-01T10:05:00Z',
+            from: { emailAddress: { address: 'user@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'client@example.com' } } ], ccRecipients: [],
+            body: { content: 'Follow-up with details... previous: hello client, can you send specs?' }
+          },
+          {
+            id: 'c', subject: 'Re: Quote Request', dateTimeSent: '2025-03-01T10:15:00Z',
+            from: { emailAddress: { address: 'client@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+            body: { content: 'Thanks, here are the specs. quoting: follow-up with details... previous: hello client, can you send specs?' }
+          }
+        ];
+
+        const base: any = {
+          id: 'a', subject: 'Quote Request', from: 'user@example.com', to: ['client@example.com'],
+          sentDate: new Date('2025-03-01T10:00:00Z'), body: 'Hello client, can you send specs?', isFromCurrentUser: true
+        };
+
+        const chain = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        expect(chain.map((m: any) => m.id)).toEqual(['a', 'b', 'c']);
+        expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
+      });
+
+      it('ends chain when containment breaks and uses last contained message for decision', () => {
+        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
+        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+        (serviceLocal as any).recentEmailsContext = [
+          {
+            id: 'b', subject: 'Re: Timeline', dateTimeSent: '2025-04-01T09:10:00Z',
+            from: { emailAddress: { address: 'client@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+            body: { content: 'Reply includes: initial plan for delivery' }
+          },
+          {
+            id: 'c', subject: 'Re: Timeline', dateTimeSent: '2025-04-01T09:20:00Z',
+            from: { emailAddress: { address: 'client@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+            body: { content: 'New unrelated content that does not contain previous reply' }
+          }
+        ];
+
+        const base: any = {
+          id: 'a', subject: 'Timeline', from: 'user@example.com', to: ['client@example.com'],
+          sentDate: new Date('2025-04-01T09:00:00Z'), body: 'Initial plan for delivery', isFromCurrentUser: true
+        };
+
+        const chain = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        expect(chain.map((m: any) => m.id)).toEqual(['a', 'b']);
+        expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
+      });
+
+      it('skips short/noisy bodies and still builds valid chain', () => {
+        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
+        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+        (serviceLocal as any).recentEmailsContext = [
+          {
+            id: 'b', subject: 'Re: Access', dateTimeSent: '2025-05-01T11:05:00Z',
+            from: { emailAddress: { address: 'user@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'client@example.com' } } ], ccRecipients: [],
+            body: { content: 'Ok.' } // too short; should be skipped in chain building
+          },
+          {
+            id: 'c', subject: 'Re: Access', dateTimeSent: '2025-05-01T11:10:00Z',
+            from: { emailAddress: { address: 'client@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+            body: { content: 'Including your message: access instructions and credentials shared yesterday.' }
+          }
+        ];
+
+        const base: any = {
+          id: 'a', subject: 'Access', from: 'user@example.com', to: ['client@example.com'],
+          sentDate: new Date('2025-05-01T11:00:00Z'), body: 'Access instructions and credentials shared yesterday.', isFromCurrentUser: true
+        };
+
+        const chain = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        expect(chain.map((m: any) => m.id)).toEqual(['a', 'c']);
+        expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
+      });
+    });
+
     describe('parseGetConversationItemsResponse', () => {
       beforeEach(() => {
         // Ensure current user email matches the XML for deterministic assertions

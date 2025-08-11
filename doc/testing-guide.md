@@ -16,17 +16,17 @@ tests/
 ## Running Tests
 
 ### All Tests
-```bash
+```powershell
 npm test
 ```
 
 ### Watch Mode
-```bash
+```powershell
 npm run test:watch
 ```
 
 ### Coverage Report
-```bash
+```powershell
 npm run test:coverage
 ```
 
@@ -43,6 +43,14 @@ Key test scenarios:
 - Emails 3-6 days = medium priority
 - Emails <3 days = low priority
 - Response detection in email threads
+- Artificial threading fallback with strict oldest→newest containment chain
+    - Multi-hop chain A→B→C where each quotes the previous and C is from external sender (suppresses follow-up)
+    - Broken chain where C does not contain B (chain ends at B for decision)
+    - Short/noisy bodies are skipped but valid chain still formed
+
+Notes:
+- Normalized-body minimum length threshold is 20 characters to reduce false matches.
+- Telemetry events for artificial threading can be asserted indirectly via behavior and logs in tests.
 
 ### LlmService Tests
 - **Configuration Management**: API endpoint and model settings

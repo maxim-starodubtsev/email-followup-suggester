@@ -12,7 +12,16 @@ interface RetryOptions {
 }
 
 interface AnalyticsEvent {
-    type: 'email_analyzed' | 'batch_processed' | 'cache_hit' | 'cache_miss' | 'error_occurred' | 'retry_attempted';
+    type:
+        | 'email_analyzed'
+        | 'batch_processed'
+        | 'cache_hit'
+        | 'cache_miss'
+        | 'error_occurred'
+        | 'retry_attempted'
+        // Telemetry for artificial thread building path
+        | 'artificial_chain_skipped'
+        | 'artificial_chain_built';
     timestamp: number;
     details: any;
 }
@@ -1747,20 +1756,30 @@ export class EmailAnalysisService {
     }
 
     // Build an artificial thread when only a single message is available by scanning recent emails
-    // for newer messages that quote the base message body and match normalized subject.
+    // and enforcing a strict oldest→newest containment chain: each newer body must contain the previous one.
     private buildArtificialThreadFromRecentEmails(base: ThreadMessage | undefined, currentUserEmail: string): ThreadMessage[] {
         if (!base) return [];
         if (!this.recentEmailsContext || this.recentEmailsContext.length === 0) return [base];
 
         const normSubject = this.normalizeSubject(base.subject || '');
-        const baseSig = this.normalizeBodyForMatch(base.body || '');
-        if (!baseSig || baseSig.length < 20) return [base];
+    const baseSig = this.normalizeBodyForMatch(base.body || '');
+    const MIN_BODY_CHARS = 20; // threshold to avoid noise-based matches
+        if (!baseSig || baseSig.length < MIN_BODY_CHARS) {
+            this.trackAnalyticsEvent('artificial_chain_skipped', {
+                reason: 'base_too_short',
+                baseId: base.id,
+                baseLen: baseSig?.length || 0,
+                subject: normSubject
+            });
+            return [base];
+        }
 
         const baseTime = base.sentDate.getTime();
         const currentLower = (currentUserEmail || '').toLowerCase();
         const baseParticipants = new Set([base.from.toLowerCase(), ...base.to.map(t => (t || '').toLowerCase())]);
 
-        const replies: ThreadMessage[] = [];
+        // Collect same-subject candidates after base time with recipient overlap (To or Cc) or addressed to current user
+        const candidates: ThreadMessage[] = [];
         for (const e of this.recentEmailsContext) {
             try {
                 const subj = this.normalizeSubject(e.subject || '');
@@ -1773,24 +1792,82 @@ export class EmailAnalysisService {
                 const overlap = candRecipients.some(addr => baseParticipants.has(addr));
                 if (!overlap && !candRecipients.includes(currentLower)) continue;
                 const body = (e.body?.content || '').toString();
-                const normBody = this.normalizeBodyForMatch(body);
-                if (!normBody || normBody.indexOf(baseSig) === -1) continue;
                 const fromAddr = (e.from?.emailAddress?.address || '').toLowerCase();
-                replies.push({
+                candidates.push({
                     id: e.id,
                     subject: e.subject,
                     from: fromAddr,
                     to: (e.toRecipients || []).map(r => r.emailAddress.address),
                     sentDate: sent,
-                    body: body,
+                    body,
                     isFromCurrentUser: fromAddr === currentLower
                 });
             } catch {
                 // ignore malformed items
             }
         }
-        const thread = [base, ...replies].sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
-        return thread;
+
+        if (candidates.length === 0) {
+            this.trackAnalyticsEvent('artificial_chain_skipped', {
+                reason: 'no_candidates',
+                baseId: base.id,
+                subject: normSubject
+            });
+            return [base];
+        }
+
+        // Sort by ascending sentDate and build strict containment chain
+        candidates.sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
+        const chain = this.buildStrictContainmentChain([base, ...candidates], MIN_BODY_CHARS);
+
+        this.trackAnalyticsEvent('artificial_chain_built', {
+            baseId: base.id,
+            subject: normSubject,
+            candidateCount: candidates.length,
+            chainLength: chain.length,
+            newestFromCurrentUser: chain[chain.length - 1]?.isFromCurrentUser ?? null
+        });
+
+        return chain;
+    }
+
+    // Given a list of messages sorted oldest→newest for the same normalized subject and time window,
+    // build a strict containment chain where each next body contains the previous one's normalized body.
+    private buildStrictContainmentChain(messages: ThreadMessage[], minBodyChars: number): ThreadMessage[] {
+        if (!messages || messages.length === 0) return [];
+        // Ensure chronological order
+        const sorted = [...messages].sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
+        const chain: ThreadMessage[] = [];
+
+        let prevSig = '';
+        for (let i = 0; i < sorted.length; i++) {
+            const m = sorted[i];
+            const sig = this.normalizeBodyForMatch(m.body || '');
+            if (!sig || sig.length < minBodyChars) {
+                // Skip too-short/noisy bodies (don't break chain, just ignore)
+                continue;
+            }
+            if (chain.length === 0) {
+                // Seed chain with the first sufficiently-long message (ideally the base/original)
+                chain.push(m);
+                prevSig = sig;
+                continue;
+            }
+            // Each subsequent message must contain the previous one's normalized body
+            if (sig.indexOf(prevSig) !== -1) {
+                chain.push(m);
+                prevSig = sig;
+            } else {
+                // Not a chain continuation; keep scanning for a message that quotes the last accepted one
+                continue;
+            }
+        }
+
+        // If chain collapsed to fewer than 1 element (shouldn't happen), return at least the last valid
+        if (chain.length === 0 && sorted.length > 0) {
+            chain.push(sorted[sorted.length - 1]);
+        }
+        return chain;
     }
 
     private normalizeBodyForMatch(text: string): string {
@@ -1802,6 +1879,9 @@ export class EmailAnalysisService {
              .replace(/subject:\s.*\n?/gi, ' ')
              .replace(/to:\s.*\n?/gi, ' ')
              .replace(/cc:\s.*\n?/gi, ' ');
+    // Remove common signature delimiters and boilerplate
+    t = t.replace(/\n--\s?[\s\S]*$/g, ' '); // signature starting with --
+    t = t.replace(/\nOn\s.*wrote:\s*$/gi, ' '); // quoted header
         t = t.replace(/\s+/g, ' ').trim().toLowerCase();
         const maxLen = 800;
         return t.length > maxLen ? t.slice(0, maxLen) : t;

@@ -65,6 +65,23 @@ This document summarizes the critical bugs identified and fixed in the `EmailAna
    - Provides clear feedback on detection results
 2. Added comprehensive debugging output for troubleshooting
 
+### Bug 4: False follow-ups in single-message fallback due to fragmented conversations
+**Issue**: When only a single email was retrieved (due to EWS fragmentation), the system sometimes marked follow-ups even though newer replies existed in other conversation fragments.
+
+**Root Cause**:
+- The artificial thread builder only looked for one-level body containment and did not enforce a strict sequence.
+- Short/noisy bodies caused unreliable matching.
+
+**Fix**:
+1. Implemented a strict oldest→newest containment chain in fallback mode: each newer message must include the normalized body of the previous.
+2. Introduced a minimum normalized-body length threshold (20 chars) to reduce noise.
+3. Added telemetry: artificial_chain_built/skipped with reasons and chain metrics.
+4. Extended tests: multi-hop chain, broken chain early stop, and noisy short bodies.
+
+**Result**:
+- Synthetic threads now reflect real reply quoting behavior across fragmented ConversationIds.
+- If the newest message in the chain is not from the current user, follow-up is suppressed.
+
 ## Test Coverage Added
 
 ### Unit Tests for Core Logic
@@ -83,6 +100,11 @@ This document summarizes the critical bugs identified and fixed in the `EmailAna
    - Mixed case email address handling
    - Proper current user identification
    - External sender identification
+
+4. **Artificial threading strict containment chain** tests:
+   - Multi-hop A→B→C where each quotes the previous and C is external (suppresses follow-up)
+   - Broken chain where C does not contain B (chain ends at B)
+   - Short/noisy bodies are skipped but valid chain still formed
 
 ### Integration Tests
 1. **Conversation processing** tests:
