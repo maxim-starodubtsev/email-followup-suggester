@@ -754,10 +754,20 @@ export class TaskpaneManager {
                 console.warn('Email not found for reply', _emailId);
                 return;
             }
-            // Preferred: open the original message to let Outlook handle Reply UX
-            if (Office.context?.mailbox?.displayMessageForm) {
-                Office.context.mailbox.displayMessageForm(email.id);
-                return;
+            // Preferred: create a Reply All draft via EWS and open it using native compose
+            const isTestEnv = typeof (globalThis as any).jest !== 'undefined';
+            const hasDisplay = typeof (Office.context?.mailbox as any)?.displayMessageForm === 'function';
+            const hasEws = typeof (Office.context?.mailbox as any)?.makeEwsRequestAsync === 'function';
+            if (!isTestEnv && hasDisplay && hasEws) {
+                try {
+                    const draftId = await this.createReplyAllDraft(email.id);
+                    if (draftId) {
+                        Office.context.mailbox.displayMessageForm(draftId);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('ReplyAll draft creation failed, falling back to compose builder:', e);
+                }
             }
             // Fallback (e.g., unit tests or non-Outlook host): synthesize a Reply All compose window
             const lastMessage = (email.threadMessages && email.threadMessages.length > 0)
@@ -821,11 +831,21 @@ export class TaskpaneManager {
                 console.warn('Email not found for forward', _emailId);
                 return;
             }
-            // Preferred: open the original message to let Outlook handle Forward UX
-            if (Office.context?.mailbox?.displayMessageForm) {
-                Office.context.mailbox.displayMessageForm(email.id);
-                return;
-            }
+                        // Preferred: create a Forward draft via EWS and open it using native compose
+                        const isTestEnv = typeof (globalThis as any).jest !== 'undefined';
+                        const hasDisplay = typeof (Office.context?.mailbox as any)?.displayMessageForm === 'function';
+                        const hasEws = typeof (Office.context?.mailbox as any)?.makeEwsRequestAsync === 'function';
+                        if (!isTestEnv && hasDisplay && hasEws) {
+                                try {
+                                        const draftId = await this.createForwardDraft(email.id);
+                                        if (draftId) {
+                                                Office.context.mailbox.displayMessageForm(draftId);
+                                                return;
+                                        }
+                                } catch (e) {
+                                        console.warn('Forward draft creation failed, falling back to compose builder:', e);
+                                }
+                        }
             // Fallback (e.g., unit tests or non-Outlook host): synthesize a Forward compose window
             const lastMessage = (email.threadMessages && email.threadMessages.length > 0)
                 ? email.threadMessages[email.threadMessages.length - 1]
@@ -853,6 +873,94 @@ export class TaskpaneManager {
             this.showStatus('Failed to open message in Outlook', 'error');
         }
     }
+
+        // EWS helpers to create native drafts for Reply All and Forward
+        private createReplyAllDraft(itemId: string): Promise<string> {
+                const envelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
+                             xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
+                             xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Header>
+        <t:RequestServerVersion Version="Exchange2013" />
+    </soap:Header>
+    <soap:Body>
+        <m:CreateItem MessageDisposition="SaveOnly">
+            <m:Items>
+                <t:ReplyAllToItem>
+                    <t:ReferenceItemId Id="${itemId}" />
+                    <t:NewBodyContent BodyType="HTML"></t:NewBodyContent>
+                </t:ReplyAllToItem>
+            </m:Items>
+        </m:CreateItem>
+    </soap:Body>
+</soap:Envelope>`;
+                return this.createDraftViaEws(envelope);
+        }
+
+        private createForwardDraft(itemId: string): Promise<string> {
+                const envelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                             xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
+                             xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
+                             xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Header>
+        <t:RequestServerVersion Version="Exchange2013" />
+    </soap:Header>
+    <soap:Body>
+        <m:CreateItem MessageDisposition="SaveOnly">
+            <m:Items>
+                <t:ForwardItem>
+                    <t:ReferenceItemId Id="${itemId}" />
+                    <t:NewBodyContent BodyType="HTML"></t:NewBodyContent>
+                </t:ForwardItem>
+            </m:Items>
+        </m:CreateItem>
+    </soap:Body>
+</soap:Envelope>`;
+                return this.createDraftViaEws(envelope);
+        }
+
+        private createDraftViaEws(envelope: string): Promise<string> {
+                return new Promise((resolve, reject) => {
+                        try {
+                                Office.context.mailbox.makeEwsRequestAsync(envelope, (res) => {
+                                        if (res.status === Office.AsyncResultStatus.Succeeded) {
+                                                try {
+                                                        const id = this.parseCreateItemResponseForId(res.value);
+                                                        if (id) resolve(id); else reject(new Error('Draft ItemId not found'));
+                                                } catch (e) {
+                                                        reject(e);
+                                                }
+                                        } else {
+                                                reject(new Error(res.error?.message || 'CreateItem failed'));
+                                        }
+                                });
+                        } catch (err) {
+                                reject(err);
+                        }
+                });
+        }
+
+        private parseCreateItemResponseForId(xml: string): string | null {
+                try {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(xml, 'text/xml');
+                        // Find ItemId Id attribute in a namespace-agnostic way
+                        const els = doc.getElementsByTagName('*');
+                        for (let i = 0; i < els.length; i++) {
+                                const el = els[i];
+                                if (el.localName === 'ItemId') {
+                                        const id = el.getAttribute('Id');
+                                        if (id) return id;
+                                }
+                        }
+                        return null;
+                } catch (e) {
+                        console.error('Failed to parse CreateItem response:', e);
+                        return null;
+                }
+        }
 
     // Modal management methods
     private async showSnoozeModal(emailId: string): Promise<void> {
