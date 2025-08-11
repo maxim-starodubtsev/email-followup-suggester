@@ -29,6 +29,7 @@ export interface ParsedEmail {
 
 export interface ParsedThreadMessage {
     id: string;
+    changeKey?: string;
     subject: string;
     from: string;
     to: string[];
@@ -159,6 +160,7 @@ export class XmlParsingService {
             
             const threadMessage: ParsedThreadMessage = {
                 id: this.getElementAttribute(messageElement, 'ItemId', 'Id') || '',
+                changeKey: this.getElementAttribute(messageElement, 'ItemId', 'ChangeKey') || undefined,
                 subject: this.getElementTextContent(messageElement, 'Subject') || '',
                 from: fromEmail,
                 to: this.parseRecipientsList(messageElement, 'ToRecipients').map(r => r.emailAddress.address),

@@ -22,6 +22,8 @@ export interface FollowupEmail {
 
 export interface ThreadMessage {
     id: string;
+    // EWS ChangeKey for the item, used by EWS operations that require a reference
+    changeKey?: string;
     subject: string;
     from: string;
     to: string[];

@@ -760,7 +760,12 @@ export class TaskpaneManager {
             const hasEws = typeof (Office.context?.mailbox as any)?.makeEwsRequestAsync === 'function';
             if (!isTestEnv && hasDisplay && hasEws) {
                 try {
-                    const draftId = await this.createReplyAllDraft(email.id);
+                    const lastMsg = (email.threadMessages && email.threadMessages.length > 0)
+                        ? email.threadMessages[email.threadMessages.length - 1]
+                        : undefined;
+                    const referenceId = lastMsg?.id || email.id;
+                    const referenceChangeKey = lastMsg?.changeKey;
+                    const draftId = await this.createReplyAllDraft(referenceId, referenceChangeKey);
                     if (draftId) {
                         Office.context.mailbox.displayMessageForm(draftId);
                         return;
@@ -837,7 +842,12 @@ export class TaskpaneManager {
                         const hasEws = typeof (Office.context?.mailbox as any)?.makeEwsRequestAsync === 'function';
                         if (!isTestEnv && hasDisplay && hasEws) {
                                 try {
-                                        const draftId = await this.createForwardDraft(email.id);
+                                        const lastMsg = (email.threadMessages && email.threadMessages.length > 0)
+                                            ? email.threadMessages[email.threadMessages.length - 1]
+                                            : undefined;
+                                        const referenceId = lastMsg?.id || email.id;
+                                        const referenceChangeKey = lastMsg?.changeKey;
+                                        const draftId = await this.createForwardDraft(referenceId, referenceChangeKey);
                                         if (draftId) {
                                                 Office.context.mailbox.displayMessageForm(draftId);
                                                 return;
@@ -875,7 +885,7 @@ export class TaskpaneManager {
     }
 
         // EWS helpers to create native drafts for Reply All and Forward
-        private createReplyAllDraft(itemId: string): Promise<string> {
+    private createReplyAllDraft(itemId: string, changeKey?: string): Promise<string> {
                 const envelope = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                              xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
@@ -888,7 +898,7 @@ export class TaskpaneManager {
         <m:CreateItem MessageDisposition="SaveOnly">
             <m:Items>
                 <t:ReplyAllToItem>
-                    <t:ReferenceItemId Id="${itemId}" />
+            <t:ReferenceItemId Id="${itemId}"${changeKey ? ` ChangeKey="${changeKey}"` : ''} />
                     <t:NewBodyContent BodyType="HTML"></t:NewBodyContent>
                 </t:ReplyAllToItem>
             </m:Items>
@@ -898,7 +908,7 @@ export class TaskpaneManager {
                 return this.createDraftViaEws(envelope);
         }
 
-        private createForwardDraft(itemId: string): Promise<string> {
+    private createForwardDraft(itemId: string, changeKey?: string): Promise<string> {
                 const envelope = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                              xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
@@ -911,7 +921,7 @@ export class TaskpaneManager {
         <m:CreateItem MessageDisposition="SaveOnly">
             <m:Items>
                 <t:ForwardItem>
-                    <t:ReferenceItemId Id="${itemId}" />
+            <t:ReferenceItemId Id="${itemId}"${changeKey ? ` ChangeKey="${changeKey}"` : ''} />
                     <t:NewBodyContent BodyType="HTML"></t:NewBodyContent>
                 </t:ForwardItem>
             </m:Items>
@@ -921,13 +931,17 @@ export class TaskpaneManager {
                 return this.createDraftViaEws(envelope);
         }
 
-        private createDraftViaEws(envelope: string): Promise<string> {
+    private createDraftViaEws(envelope: string): Promise<string> {
                 return new Promise((resolve, reject) => {
                         try {
                                 Office.context.mailbox.makeEwsRequestAsync(envelope, (res) => {
                                         if (res.status === Office.AsyncResultStatus.Succeeded) {
                                                 try {
-                                                        const id = this.parseCreateItemResponseForId(res.value);
+                            const validation = this.xmlValidate(res.value);
+                            if (!validation.isValid) {
+                                console.warn('EWS CreateItem response indicates error:', validation.error);
+                            }
+                            const id = this.parseCreateItemResponseForId(res.value);
                                                         if (id) resolve(id); else reject(new Error('Draft ItemId not found'));
                                                 } catch (e) {
                                                         reject(e);
@@ -942,7 +956,7 @@ export class TaskpaneManager {
                 });
         }
 
-        private parseCreateItemResponseForId(xml: string): string | null {
+    private parseCreateItemResponseForId(xml: string): string | null {
                 try {
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(xml, 'text/xml');
@@ -955,12 +969,45 @@ export class TaskpaneManager {
                                         if (id) return id;
                                 }
                         }
-                        return null;
+            console.warn('EWS CreateItem response did not contain ItemId. Raw response follows for diagnostics.');
+            console.warn(xml);
+            return null;
                 } catch (e) {
                         console.error('Failed to parse CreateItem response:', e);
                         return null;
                 }
         }
+
+    // Light wrapper around XmlParsingService.validateEwsResponse without importing to keep bundle minimal
+    private xmlValidate(xml: string): { isValid: boolean; error?: string } {
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xml, 'text/xml');
+            const parserError = xmlDoc.querySelector('parsererror');
+            if (parserError) {
+                return { isValid: false, error: `XML Parse Error: ${parserError.textContent}` };
+            }
+            const nsSOAP = 'http://schemas.xmlsoap.org/soap/envelope/';
+            const fault = xmlDoc.getElementsByTagNameNS(nsSOAP, 'Fault')[0];
+            if (fault) {
+                const faultString = fault.querySelector('faultstring')?.textContent || 'Unknown SOAP fault';
+                return { isValid: false, error: `SOAP Fault: ${faultString}` };
+            }
+            const nsMsg = 'http://schemas.microsoft.com/exchange/services/2006/messages';
+            const respMsgs = xmlDoc.getElementsByTagNameNS(nsMsg, 'ResponseMessages')[0];
+            if (respMsgs) {
+                const errorResp = respMsgs.querySelector('[ResponseClass="Error"]');
+                if (errorResp) {
+                    const code = errorResp.querySelector('ResponseCode')?.textContent || 'Unknown error';
+                    const text = errorResp.querySelector('MessageText')?.textContent || '';
+                    return { isValid: false, error: `EWS Error ${code}: ${text}` };
+                }
+            }
+            return { isValid: true };
+        } catch (err) {
+            return { isValid: false, error: `Validation error: ${(err as Error).message}` };
+        }
+    }
 
     // Modal management methods
     private async showSnoozeModal(emailId: string): Promise<void> {
