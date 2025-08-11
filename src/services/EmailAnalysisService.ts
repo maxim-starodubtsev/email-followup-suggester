@@ -1081,24 +1081,31 @@ export class EmailAnalysisService {
 
         let considered = 0;
         let matched = 0;
+        const skipCounters: Record<string, number> = {
+            subject_mismatch: 0,
+            not_newer: 0,
+            outside_window: 0,
+            same_sender: 0,
+            no_overlap: 0
+        };
         for (const e of this.recentEmailsContext) {
             try {
                 const subj = this.normalizeSubject(e.subject || '');
-                if (subj !== normSubject) continue;
+                if (subj !== normSubject) { skipCounters.subject_mismatch++; continue; }
                 const sentD = new Date(e.dateTimeSent);
                 if (!(sentD instanceof Date) || isNaN(sentD.getTime())) continue;
-                if (sentD.getTime() <= baseTime) continue;
-                if (sentD.getTime() - baseTime > windowMs) continue;
+                if (sentD.getTime() <= baseTime) { skipCounters.not_newer++; continue; }
+                if (sentD.getTime() - baseTime > windowMs) { skipCounters.outside_window++; continue; }
 
                 const fromAddr = (e.from?.emailAddress?.address || '').toLowerCase();
-                if (!fromAddr || fromAddr === currentLower) continue; // must be other user
+                if (!fromAddr || fromAddr === currentLower) { skipCounters.same_sender++; continue; } // must be other user
                 const toList = (e.toRecipients || []).map(r => (r.emailAddress.address || '').toLowerCase());
                 const ccList = (e.ccRecipients || []).map(r => (r.emailAddress.address || '').toLowerCase());
                 const candRecipients = new Set([...toList, ...ccList, fromAddr]);
 
                 // Require some participant overlap to avoid unrelated same-subject threads
                 const overlap = Array.from(candRecipients).some(addr => baseRecipients.has(addr));
-                if (!overlap) continue;
+                if (!overlap) { skipCounters.no_overlap++; continue; }
 
                 considered++;
 
@@ -1114,13 +1121,13 @@ export class EmailAnalysisService {
                 // Otherwise, accept subject+participant overlap as a suppression signal
                 matched++;
                 console.log(`[DEBUG] Newer other-user email (${e.id}) matches by subject and participants overlap.`);
-                return true;
+        return true;
             } catch {
                 continue;
             }
         }
 
-        console.log(`[DEBUG] Newer-other suppression scan: considered=${considered}, matched=${matched} for subject="${normSubject}"`);
+    console.log(`[DEBUG] Newer-other suppression scan: considered=${considered}, matched=${matched} for subject="${normSubject}" | skips: ${JSON.stringify(skipCounters)}`);
         return false;
     }
 
@@ -1386,17 +1393,27 @@ export class EmailAnalysisService {
         return kept;
     }
 
-    // Normalize subjects by removing common reply/forward prefixes and collapsing whitespace
+    // Normalize subjects by removing common reply/forward prefixes (including counts/localized forms) and collapsing whitespace
     private normalizeSubject(subject: string): string {
         if (!subject) return '';
         let s = subject.trim();
-        // Remove multiple stacked prefixes like Re:, Fwd:, FW:, SV:, VS:, Ответ:, etc.
-        // Common international variants included conservatively
-        const prefixRe = /^(re|fwd|fw|sv|vs|aw|答复|回复|rép|antwort|tr|rv|回复|ответ|отв|转发)\s*:\s*/i;
-        // Loop to strip repeated prefixes
-        while (prefixRe.test(s)) {
-            s = s.replace(prefixRe, '');
-            s = s.trim();
+        // Iteratively strip stacked prefixes from the start
+        // Handles cases like: "Re:", "RE[2]:", "FW:", "Fwd:", "Antwort:", "回复:", fullwidth colon, and even missing colon with a space
+        const patterns: RegExp[] = [
+            /^(re|fw|fwd|sv|vs|aw|tr|rv)(\s*\[\d+\])?\s*[:：]\s*/i,
+            /^(antwort|rép|odp|wg|отв|ответ|回复|答复|转发)\s*[:：]\s*/i,
+            /^(re|fw|fwd)\s+(?=\S)/i
+        ];
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const rx of patterns) {
+                if (rx.test(s)) {
+                    s = s.replace(rx, '');
+                    s = s.trim();
+                    changed = true;
+                }
+            }
         }
         // Collapse internal whitespace and lowercase for stable matching
         s = s.replace(/\s+/g, ' ').toLowerCase();
@@ -1842,8 +1859,10 @@ export class EmailAnalysisService {
         if (!this.recentEmailsContext || this.recentEmailsContext.length === 0) return [base];
 
         const normSubject = this.normalizeSubject(base.subject || '');
-    const baseSig = this.normalizeBodyForMatch(base.body || '');
-    const MIN_BODY_CHARS = 20; // threshold to avoid noise-based matches
+        const baseSig = this.normalizeBodyForMatch(base.body || '');
+        const MIN_BODY_CHARS = 20; // threshold to avoid noise-based matches
+        const windowMs = this.CROSS_CONV_DEDUPE_WINDOW_MS;
+        console.log(`[DEBUG] Artificial chain builder: baseId=${base.id} normSubject="${normSubject}" baseLen=${baseSig?.length || 0}`);
         if (!baseSig || baseSig.length < MIN_BODY_CHARS) {
             console.log(`[DEBUG] 🧪 Artificial chain skipped: base body too short (len=${baseSig?.length || 0}) for subject "${normSubject}"`);
             this.trackAnalyticsEvent('artificial_chain_skipped', {
@@ -1861,17 +1880,24 @@ export class EmailAnalysisService {
 
         // Collect same-subject candidates after base time with recipient overlap (To or Cc) or addressed to current user
         const candidates: ThreadMessage[] = [];
+        const skipCounters: Record<string, number> = {
+            subject_mismatch: 0,
+            not_newer: 0,
+            outside_window: 0,
+            no_overlap: 0
+        };
         for (const e of this.recentEmailsContext) {
             try {
                 const subj = this.normalizeSubject(e.subject || '');
-                if (subj !== normSubject) continue;
+                if (subj !== normSubject) { skipCounters.subject_mismatch++; continue; }
                 const sent = new Date(e.dateTimeSent);
-                if (!(sent instanceof Date) || isNaN(sent.getTime()) || sent.getTime() <= baseTime) continue;
+                if (!(sent instanceof Date) || isNaN(sent.getTime()) || sent.getTime() <= baseTime) { skipCounters.not_newer++; continue; }
+                if (sent.getTime() - baseTime > windowMs) { skipCounters.outside_window++; continue; }
                 const toList = (e.toRecipients || []).map(r => (r.emailAddress.address || '').toLowerCase());
                 const ccList = ((e as any).ccRecipients || []).map((r: any) => (r.emailAddress.address || '').toLowerCase());
                 const candRecipients = [...toList, ...ccList];
                 const overlap = candRecipients.some(addr => baseParticipants.has(addr));
-                if (!overlap && !candRecipients.includes(currentLower)) continue;
+                if (!overlap && !candRecipients.includes(currentLower)) { skipCounters.no_overlap++; continue; }
                 const body = (e.body?.content || '').toString();
                 const fromAddr = (e.from?.emailAddress?.address || '').toLowerCase();
                 candidates.push({
@@ -1890,10 +1916,12 @@ export class EmailAnalysisService {
 
         if (candidates.length === 0) {
             console.log(`[DEBUG] 🧪 Artificial chain skipped: no candidates found for base ${base.id} subject "${normSubject}"`);
+            console.log(`[DEBUG] Candidate skip reasons: ${JSON.stringify(skipCounters)}`);
             this.trackAnalyticsEvent('artificial_chain_skipped', {
                 reason: 'no_candidates',
                 baseId: base.id,
-                subject: normSubject
+                subject: normSubject,
+                skipCounters
             });
             return [base];
         }
@@ -1903,6 +1931,7 @@ export class EmailAnalysisService {
         const chain = this.buildStrictContainmentChain([base, ...candidates], MIN_BODY_CHARS);
 
     console.log(`[DEBUG] 🧪 Artificial chain built for subject "${normSubject}"; candidateCount=${candidates.length}; chainLength=${chain.length}`);
+    console.log(`[DEBUG] Candidate skip reasons: ${JSON.stringify(skipCounters)}`);
     this.trackAnalyticsEvent('artificial_chain_built', {
             baseId: base.id,
             subject: normSubject,

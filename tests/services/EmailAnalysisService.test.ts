@@ -1172,7 +1172,67 @@ describe('EmailAnalysisService', () => {
         expect(chain.map((m: any) => m.id)).toEqual(['a', 'c']);
         expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
       });
+
+      it('binds base subject and Re:/FW: variants via normalizeSubject', () => {
+        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
+        const svc = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+        (svc as any).recentEmailsContext = [
+          {
+            id: 'r1', subject: 'Re: Need to discuss new add-in', dateTimeSent: '2025-08-04T20:10:29Z',
+            from: { emailAddress: { address: 'other@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+            body: { content: 'Replying... quoting: let\'s discuss the new add-in features soon.' }
+          },
+          {
+            id: 'r2', subject: 'FW: Need to discuss new add-in', dateTimeSent: '2025-08-04T20:12:00Z',
+            from: { emailAddress: { address: 'colleague@example.com' } },
+            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+            body: { content: 'Fwd FYI: let\'s discuss the new add-in features soon.' }
+          }
+        ];
+        const base: any = {
+          id: 'b', subject: 'Need to discuss new add-in', from: 'user@example.com', to: ['other@example.com'],
+          sentDate: new Date('2025-08-04T11:50:08Z'), body: "Let's discuss the new add-in features soon.", isFromCurrentUser: true
+        };
+        const chain = (svc as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        expect(chain.length).toBeGreaterThan(1);
+        // Should include r1 at minimum since it quotes the base and matches normalized subject
+        expect(chain.some((m: any) => m.id === 'r1')).toBe(true);
+      });
     });
+
+  describe('Subject normalization and suppression logging', () => {
+    it('normalizes reply/forward prefixes including counts and localized variants', () => {
+      const norm = (service as any).normalizeSubject.bind(service);
+      expect(norm('Re: Hello')).toBe('hello');
+      expect(norm('RE:  Hello  World')).toBe('hello world');
+      expect(norm('Re[2]: Hello')).toBe('hello');
+      expect(norm('FW: Hello')).toBe('hello');
+      expect(norm('Fwd: Hello')).toBe('hello');
+      expect(norm('Antwort: Hallo')).toBe('hallo');
+      expect(norm('回复: 您好')).toBe('您好');
+      expect(norm('转发: 您好')).toBe('您好');
+    });
+
+    it('suppresses single-email follow-up when newer same-subject from other exists', () => {
+      (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
+      const svc = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+      (svc as any).recentEmailsContext = [
+        {
+          id: 'n1', subject: 'Re: Demo', dateTimeSent: new Date('2025-02-02T10:00:00Z').toISOString(),
+          from: { emailAddress: { address: 'other@example.com' } },
+          toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
+          body: { content: 'Quoting: can we schedule the demo tomorrow?' }
+        }
+      ];
+      const base: ThreadMessage = {
+        id: 'b1', subject: 'Demo', from: 'user@example.com', to: ['other@example.com'],
+        sentDate: new Date('2025-02-02T09:00:00Z'), body: 'Can we schedule the demo tomorrow?', isFromCurrentUser: true
+      } as any;
+      const suppressed = (svc as any).hasNewerOtherWithSameSubject(base, 'user@example.com');
+      expect(suppressed).toBe(true);
+    });
+  });
 
     describe('parseGetConversationItemsResponse', () => {
       beforeEach(() => {
