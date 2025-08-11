@@ -487,10 +487,24 @@ export class EmailAnalysisService {
         // If we only have a single message (fallback path), try to build an artificial thread by scanning recent emails
         if (threadMessages.length <= 1) {
             const base = threadMessages[0];
+            console.log(`[DEBUG] 🔎 SINGLE-EMAIL FALLBACK engaged for conversation ${conversationId}. Attempting artificial chain...`);
             const artificial = this.buildArtificialThreadFromRecentEmails(base, currentUserEmail);
             if (artificial.length > 1) {
                 console.log(`[DEBUG] 🧩 Artificial thread assembled with ${artificial.length} messages (fallback mode)`);
                 threadMessages = artificial;
+            } else {
+                // Safety suppression: if newer same-subject mail(s) from others exist, do not mark follow-up
+                if (base && this.hasNewerOtherWithSameSubject(base, currentUserEmail)) {
+                    console.log(`[DEBUG] ❌ SUPPRESSED: Newer same-subject email from OTHER user exists. Not a follow-up.`);
+                    this.trackAnalyticsEvent('artificial_chain_skipped', {
+                        reason: 'suppressed_by_newer_other',
+                        baseId: base.id,
+                        subject: this.normalizeSubject(base.subject || '')
+                    });
+                    this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+                    return null;
+                }
+                console.log(`[DEBUG] ⚠️ Artificial chain not formed; proceeding with single-message evaluation.`);
             }
         }
         console.log(`[DEBUG] Retrieved ${threadMessages.length} thread messages for conversation ${conversationId}`);
@@ -1020,8 +1034,17 @@ export class EmailAnalysisService {
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(xmlResponse, 'text/xml');
             
-            // Look for the message element in the GetItem response
-            const messageElements = xmlDoc.getElementsByTagName('t:Message');
+            // Look for the message element in the GetItem response (namespace-agnostic)
+            let messageElements = xmlDoc.getElementsByTagNameNS('*', 'Message');
+            if (!messageElements || messageElements.length === 0) {
+                // Fallbacks
+                const alt1 = xmlDoc.getElementsByTagName('t:Message');
+                const alt2 = xmlDoc.getElementsByTagName('Message');
+                const combined: Element[] = [];
+                for (let i = 0; i < alt1.length; i++) combined.push(alt1[i]);
+                for (let i = 0; i < alt2.length; i++) combined.push(alt2[i]);
+                messageElements = combined as unknown as HTMLCollectionOf<Element>;
+            }
             if (messageElements.length === 0) {
                 console.log(`[DEBUG] No message found in GetItem response`);
                 return [];
@@ -1042,6 +1065,63 @@ export class EmailAnalysisService {
             console.error(`[ERROR] Failed to parse GetItem response:`, error);
             return [];
         }
+    }
+
+    // Check if newer emails with the same normalized subject exist from other participants,
+    // indicating the single-message should be suppressed from follow-up.
+    private hasNewerOtherWithSameSubject(base: ThreadMessage, currentUserEmail: string): boolean {
+        if (!this.recentEmailsContext || this.recentEmailsContext.length === 0) return false;
+        const normSubject = this.normalizeSubject(base.subject || '');
+        const baseTime = base.sentDate.getTime();
+        const windowMs = this.CROSS_CONV_DEDUPE_WINDOW_MS; // reuse 3-day window
+        const currentLower = (currentUserEmail || '').toLowerCase();
+        const baseFrom = (base.from || '').toLowerCase();
+        const baseRecipients = new Set([...(base.to || []).map(r => (r || '').toLowerCase()), baseFrom]);
+        const baseSig = this.normalizeBodyForMatch(base.body || '');
+
+        let considered = 0;
+        let matched = 0;
+        for (const e of this.recentEmailsContext) {
+            try {
+                const subj = this.normalizeSubject(e.subject || '');
+                if (subj !== normSubject) continue;
+                const sentD = new Date(e.dateTimeSent);
+                if (!(sentD instanceof Date) || isNaN(sentD.getTime())) continue;
+                if (sentD.getTime() <= baseTime) continue;
+                if (sentD.getTime() - baseTime > windowMs) continue;
+
+                const fromAddr = (e.from?.emailAddress?.address || '').toLowerCase();
+                if (!fromAddr || fromAddr === currentLower) continue; // must be other user
+                const toList = (e.toRecipients || []).map(r => (r.emailAddress.address || '').toLowerCase());
+                const ccList = (e.ccRecipients || []).map(r => (r.emailAddress.address || '').toLowerCase());
+                const candRecipients = new Set([...toList, ...ccList, fromAddr]);
+
+                // Require some participant overlap to avoid unrelated same-subject threads
+                const overlap = Array.from(candRecipients).some(addr => baseRecipients.has(addr));
+                if (!overlap) continue;
+
+                considered++;
+
+                // Prefer a body containment confirmation when base body is substantive
+                const candBody = (e.body?.content || '').toString();
+                const candSig = this.normalizeBodyForMatch(candBody);
+                if (baseSig && baseSig.length >= 20 && candSig.indexOf(baseSig) !== -1) {
+                    matched++;
+                    console.log(`[DEBUG] Newer other-user email (${e.id}) matches by subject and body containment.`);
+                    return true;
+                }
+
+                // Otherwise, accept subject+participant overlap as a suppression signal
+                matched++;
+                console.log(`[DEBUG] Newer other-user email (${e.id}) matches by subject and participants overlap.`);
+                return true;
+            } catch {
+                continue;
+            }
+        }
+
+        console.log(`[DEBUG] Newer-other suppression scan: considered=${considered}, matched=${matched} for subject="${normSubject}"`);
+        return false;
     }
 
     private getLastMessageInThread(threadMessages: ThreadMessage[]): ThreadMessage | null {
@@ -1765,6 +1845,7 @@ export class EmailAnalysisService {
     const baseSig = this.normalizeBodyForMatch(base.body || '');
     const MIN_BODY_CHARS = 20; // threshold to avoid noise-based matches
         if (!baseSig || baseSig.length < MIN_BODY_CHARS) {
+            console.log(`[DEBUG] 🧪 Artificial chain skipped: base body too short (len=${baseSig?.length || 0}) for subject "${normSubject}"`);
             this.trackAnalyticsEvent('artificial_chain_skipped', {
                 reason: 'base_too_short',
                 baseId: base.id,
@@ -1808,6 +1889,7 @@ export class EmailAnalysisService {
         }
 
         if (candidates.length === 0) {
+            console.log(`[DEBUG] 🧪 Artificial chain skipped: no candidates found for base ${base.id} subject "${normSubject}"`);
             this.trackAnalyticsEvent('artificial_chain_skipped', {
                 reason: 'no_candidates',
                 baseId: base.id,
@@ -1820,7 +1902,8 @@ export class EmailAnalysisService {
         candidates.sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
         const chain = this.buildStrictContainmentChain([base, ...candidates], MIN_BODY_CHARS);
 
-        this.trackAnalyticsEvent('artificial_chain_built', {
+    console.log(`[DEBUG] 🧪 Artificial chain built for subject "${normSubject}"; candidateCount=${candidates.length}; chainLength=${chain.length}`);
+    this.trackAnalyticsEvent('artificial_chain_built', {
             baseId: base.id,
             subject: normSubject,
             candidateCount: candidates.length,
