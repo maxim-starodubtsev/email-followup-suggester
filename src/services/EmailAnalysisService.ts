@@ -600,10 +600,8 @@ export class EmailAnalysisService {
     private buildGetConversationItemsRequest(conversationId: string, maxItems = 250): string {
         // Using shallow to respect folder boundaries but conversation API returns nodes.
         // Optionally FoldersToIgnore could list drafts/deleteditems if filtering earlier.
-        return `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
-               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+    return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
   <soap:Header>
     <t:RequestServerVersion Version="Exchange2013" />
   </soap:Header>

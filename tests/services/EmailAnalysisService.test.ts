@@ -220,6 +220,16 @@ describe('EmailAnalysisService', () => {
   });
 
   describe('Thread Analysis and Response Detection (Bug Fixes)', () => {
+    describe('GetConversationItems SOAP request', () => {
+      it('should include proper namespace declarations on the Envelope tag', () => {
+        const req = (service as any).buildGetConversationItemsRequest('ABC123');
+        expect(req).toContain('<soap:Envelope');
+        // Namespaces must be on the same opening tag
+        expect(req).toContain('xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"');
+        expect(req).toContain('xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"');
+        expect(req).toContain('xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"');
+      });
+    });
     describe('getLastMessageInThread', () => {
       it('should return the chronologically latest message', () => {
         const messages: ThreadMessage[] = [
@@ -985,6 +995,71 @@ describe('EmailAnalysisService', () => {
         spyFolderPath.mockRestore();
         spyItem.mockRestore();
         spyCreate.mockRestore();
+      });
+    });
+
+    describe('parseGetConversationItemsResponse', () => {
+      beforeEach(() => {
+        // Ensure current user email matches the XML for deterministic assertions
+        (global as any).Office = {
+          context: {
+            mailbox: {
+              userProfile: {
+                emailAddress: 'test@example.com'
+              }
+            }
+          }
+        };
+      });
+      it('should parse messages and sort chronologically by received or sent date', () => {
+        const xml = `<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+    <m:GetConversationItemsResponse>
+      <m:ResponseMessages>
+        <m:GetConversationItemsResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:ConversationNodes>
+            <t:ConversationNode>
+              <t:Items>
+                <t:Message>
+                  <t:ItemId Id="id-1" />
+                  <t:Subject>Subj 1</t:Subject>
+                  <t:DateTimeSent>2025-01-20T10:00:00Z</t:DateTimeSent>
+                  <t:DateTimeReceived>2025-01-20T10:05:00Z</t:DateTimeReceived>
+                  <t:From><t:Mailbox><t:EmailAddress>other@example.com</t:EmailAddress></t:Mailbox></t:From>
+                  <t:ToRecipients><t:Mailbox><t:EmailAddress>test@example.com</t:EmailAddress></t:Mailbox></t:ToRecipients>
+                  <t:Body>Body 1</t:Body>
+                </t:Message>
+              </t:Items>
+            </t:ConversationNode>
+            <t:ConversationNode>
+              <t:Items>
+                <t:Message>
+                  <t:ItemId Id="id-2" />
+                  <t:Subject>Subj 2</t:Subject>
+                  <t:DateTimeSent>2025-01-21T12:00:00Z</t:DateTimeSent>
+                  <t:DateTimeReceived>2025-01-21T12:02:00Z</t:DateTimeReceived>
+                  <t:From><t:Mailbox><t:EmailAddress>test@example.com</t:EmailAddress></t:Mailbox></t:From>
+                  <t:ToRecipients><t:Mailbox><t:EmailAddress>other@example.com</t:EmailAddress></t:Mailbox></t:ToRecipients>
+                  <t:Body>Body 2</t:Body>
+                </t:Message>
+              </t:Items>
+            </t:ConversationNode>
+          </m:ConversationNodes>
+        </m:GetConversationItemsResponseMessage>
+      </m:ResponseMessages>
+    </m:GetConversationItemsResponse>
+  </s:Body>
+</s:Envelope>`;
+
+        const parsed = (service as any).parseGetConversationItemsResponse(xml) as ThreadMessage[];
+        expect(parsed.length).toBe(2);
+        // Sorted chronologically by receivedDate/sentDate ascending
+        expect(parsed[0].id).toBe('id-1');
+        expect(parsed[1].id).toBe('id-2');
+        expect(parsed[0].isFromCurrentUser).toBe(false);
+        expect(parsed[1].isFromCurrentUser).toBe(true);
       });
     });
   });
