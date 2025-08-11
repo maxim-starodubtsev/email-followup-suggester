@@ -166,6 +166,12 @@
             margin: 10px 0;
             color: #555;
             line-height: 1.4;
+            font-size: 12pt;
+        }
+
+        /* Ensure nested elements in summary don't exceed 12pt */
+        .email-summary * {
+            font-size: inherit !important;
         }
 
         .llm-suggestion {

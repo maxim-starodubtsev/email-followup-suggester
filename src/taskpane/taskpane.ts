@@ -595,7 +595,10 @@ export class TaskpaneManager {
             (email.llmSuggestion ? 20 : 0)
         ));
 
-        emailDiv.innerHTML = `
+    const toLine = this.formatRecipientsAsEmails(email.recipients).join(', ');
+    const summaryHtml = this.renderSummaryHtml(email.summary);
+
+    emailDiv.innerHTML = `
             <div class="email-header">
                 <span class="priority-badge">${priorityBadge}</span>
                 <span class="account-badge">${accountBadge}</span>
@@ -604,7 +607,7 @@ export class TaskpaneManager {
             <div class="email-subject">${this.escapeHtml(email.subject)}</div>
             <div class="email-metadata">
                 <div class="metadata-item">
-                    <span>📤 To: ${this.escapeHtml(email.recipients.join(', '))}</span>
+            <span>📤 To: ${this.escapeHtml(toLine)}</span>
                 </div>
                 <div class="metadata-item">
                     <span>📅 ${email.sentDate.toLocaleDateString()}</span>
@@ -620,7 +623,7 @@ export class TaskpaneManager {
                 </div>
                 <span>${confidence}%</span>
             </div>
-            <div class="email-summary">${this.escapeHtml(email.summary)}</div>
+        <div class="email-summary">${summaryHtml}</div>
             ${email.llmSuggestion ? `<div class="llm-suggestion"><strong>AI Suggestion:</strong> ${this.escapeHtml(email.llmSuggestion)}</div>` : ''}
             <div class="email-actions">
                 <button class="action-button" data-email-id="${email.id}" data-action="reply">Reply</button>
@@ -707,10 +710,11 @@ export class TaskpaneManager {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'thread-message';
             
-            messageDiv.innerHTML = `
+        const toHeader = this.formatRecipientsAsEmails(message.to).join(', ');
+        messageDiv.innerHTML = `
                 <div class="thread-message-header">
                     <strong>Message ${index + 1}</strong> - ${message.sentDate.toLocaleDateString()} ${message.sentDate.toLocaleTimeString()}
-                    <br>From: ${this.escapeHtml(message.from)} | To: ${this.escapeHtml(message.to.join(', '))}
+            <br>From: ${this.escapeHtml(message.from)} | To: ${this.escapeHtml(toHeader)}
                 </div>
                 <div class="thread-message-body">
                     ${this.escapeHtml(message.body)}
@@ -1266,6 +1270,41 @@ export class TaskpaneManager {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // Decode common HTML entities to plain text
+    private decodeHtmlEntities(text: string): string {
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = text;
+        return textarea.value;
+    }
+
+    // Render a short summary as sanitized HTML: decode entities, remove empty lines, preserve new lines (as <br>), no &nbsp;, and cap font size via CSS
+    private renderSummaryHtml(raw: string): string {
+        if (!raw) return '';
+        // Normalize non-breaking spaces and decode entities
+        let normalized = raw.replace(/&nbsp;/gi, ' ').replace(/\u00A0/g, ' ');
+        normalized = this.decodeHtmlEntities(normalized);
+        // Preserve new lines and remove empty lines
+        const lines = normalized
+            .split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l.length > 0);
+        const safe = lines.map(l => this.escapeHtml(l));
+        return safe.join('<br>');
+    }
+
+    // Ensure recipients are shown as email addresses
+    private formatRecipientsAsEmails(recipients: string[]): string[] {
+        return (recipients || []).map(r => this.extractEmail(r)).filter(r => !!r);
+    }
+
+    private extractEmail(text: string): string {
+        if (!text) return '';
+        const angle = text.match(/<([^>]+)>/);
+        if (angle && angle[1]) return angle[1].trim();
+        const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+        return match ? match[0] : text;
     }
 
     // Refresh emails (re-run analysis)
