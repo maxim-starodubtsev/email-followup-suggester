@@ -885,8 +885,18 @@ export class TaskpaneManager {
     }
 
         // EWS helpers to create native drafts for Reply All and Forward
-    private createReplyAllDraft(itemId: string, changeKey?: string): Promise<string> {
-                const envelope = `<?xml version="1.0" encoding="utf-8"?>
+    private async createReplyAllDraft(itemId: string, changeKey?: string): Promise<string> {
+        // OWA often requires ChangeKey for write operations; fetch if not provided
+        let ck = changeKey;
+        if (!ck) {
+            try {
+                const info = await this.getItemIdWithChangeKey(itemId);
+                if (info?.changeKey) ck = info.changeKey;
+            } catch (e) {
+                console.warn('Failed to fetch ChangeKey via GetItem; proceeding without it.', e);
+            }
+        }
+        const envelope = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                              xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
                              xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
@@ -898,7 +908,7 @@ export class TaskpaneManager {
         <m:CreateItem MessageDisposition="SaveOnly">
             <m:Items>
                 <t:ReplyAllToItem>
-            <t:ReferenceItemId Id="${itemId}"${changeKey ? ` ChangeKey="${changeKey}"` : ''} />
+            <t:ReferenceItemId Id="${itemId}"${ck ? ` ChangeKey="${ck}"` : ''} />
                     <t:NewBodyContent BodyType="HTML"></t:NewBodyContent>
                 </t:ReplyAllToItem>
             </m:Items>
@@ -908,8 +918,18 @@ export class TaskpaneManager {
                 return this.createDraftViaEws(envelope);
         }
 
-    private createForwardDraft(itemId: string, changeKey?: string): Promise<string> {
-                const envelope = `<?xml version="1.0" encoding="utf-8"?>
+    private async createForwardDraft(itemId: string, changeKey?: string): Promise<string> {
+        // OWA often requires ChangeKey for write operations; fetch if not provided
+        let ck = changeKey;
+        if (!ck) {
+            try {
+                const info = await this.getItemIdWithChangeKey(itemId);
+                if (info?.changeKey) ck = info.changeKey;
+            } catch (e) {
+                console.warn('Failed to fetch ChangeKey via GetItem; proceeding without it.', e);
+            }
+        }
+        const envelope = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                              xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" 
                              xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types" 
@@ -921,7 +941,7 @@ export class TaskpaneManager {
         <m:CreateItem MessageDisposition="SaveOnly">
             <m:Items>
                 <t:ForwardItem>
-            <t:ReferenceItemId Id="${itemId}"${changeKey ? ` ChangeKey="${changeKey}"` : ''} />
+            <t:ReferenceItemId Id="${itemId}"${ck ? ` ChangeKey="${ck}"` : ''} />
                     <t:NewBodyContent BodyType="HTML"></t:NewBodyContent>
                 </t:ForwardItem>
             </m:Items>
@@ -930,6 +950,59 @@ export class TaskpaneManager {
 </soap:Envelope>`;
                 return this.createDraftViaEws(envelope);
         }
+
+    // Fetch ItemId+ChangeKey for a given item via EWS GetItem
+    private getItemIdWithChangeKey(itemId: string): Promise<{ id: string; changeKey?: string } | null> {
+        const envelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+           xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+           xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2013" />
+  </soap:Header>
+  <soap:Body>
+    <m:GetItem>
+      <m:ItemShape>
+    <t:BaseShape>IdOnly</t:BaseShape>
+      </m:ItemShape>
+      <m:ItemIds>
+    <t:ItemId Id="${itemId}" />
+      </m:ItemIds>
+    </m:GetItem>
+  </soap:Body>
+</soap:Envelope>`;
+        return new Promise((resolve, reject) => {
+            try {
+                Office.context.mailbox.makeEwsRequestAsync(envelope, (res) => {
+                    if (res.status === Office.AsyncResultStatus.Succeeded) {
+                        try {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(res.value, 'text/xml');
+                            const els = doc.getElementsByTagName('*');
+                            for (let i = 0; i < els.length; i++) {
+                                const el = els[i];
+                                if (el.localName === 'ItemId') {
+                                    const id = el.getAttribute('Id') || '';
+                                    const ck = el.getAttribute('ChangeKey') || undefined;
+                                    return resolve({ id, changeKey: ck });
+                                }
+                            }
+                            console.warn('GetItem returned no ItemId. Raw response follows.');
+                            console.warn(res.value);
+                            resolve(null);
+                        } catch (e) {
+                            reject(e);
+                        }
+                    } else {
+                        reject(new Error(res.error?.message || 'GetItem failed'));
+                    }
+                });
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
 
     private createDraftViaEws(envelope: string): Promise<string> {
                 return new Promise((resolve, reject) => {
