@@ -20,6 +20,8 @@ interface AnalyticsEvent {
 export class EmailAnalysisService {
     private readonly SUMMARY_MAX_LENGTH = 150;
     private readonly BATCH_SIZE = 10;
+    // Window for cross-conversation dedupe when ConversationId fragments but represents the same human thread
+    private readonly CROSS_CONV_DEDUPE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
     private readonly DEFAULT_RETRY_OPTIONS: RetryOptions = {
         maxRetries: 3,
         baseDelay: 1000,
@@ -1237,17 +1239,64 @@ export class EmailAnalysisService {
 
     // Remove duplicate followup emails representing same conversation/thread. Keep newest sentDate.
     private dedupeFollowupEmails(followups: FollowupEmail[]): FollowupEmail[] {
-        const map = new Map<string, FollowupEmail>();
-        for (const f of followups) {
-            const key = (f.conversationId && f.conversationId !== f.id)
-                ? f.conversationId
-                : `${(f.conversationId || '').toLowerCase()}|${f.subject.toLowerCase()}|${[...f.recipients].sort().join(';')}`;
-            const existing = map.get(key);
-            if (!existing || existing.sentDate < f.sentDate) {
-                map.set(key, f);
+        if (followups.length <= 1) return followups;
+
+        // Sort newest first so we keep the most recent when deduping
+        const sorted = [...followups].sort((a, b) => b.sentDate.getTime() - a.sentDate.getTime());
+
+        const kept: FollowupEmail[] = [];
+        const seenByConversation = new Set<string>();
+        const humanThreadBuckets = new Map<string, number[]>(); // key -> kept sentDate times
+
+        for (const f of sorted) {
+            const convId = (f.conversationId || '').trim();
+            const hasConvId = !!convId && convId !== f.id; // ignore bogus convIds equal to item id
+
+            // If we've already kept an entry for this exact conversation, skip older ones
+            if (hasConvId && seenByConversation.has(convId)) {
+                continue;
             }
+
+            // Build a normalized human-thread key: subject (without prefixes) + participants
+            const normSubject = this.normalizeSubject(f.subject);
+            const participants = Array.from(new Set([f.accountEmail, ...f.recipients].map(e => (e || '').toLowerCase().trim())))
+                .filter(Boolean)
+                .sort()
+                .join(';');
+            const humanKey = `${normSubject}|${participants}`;
+
+            // If another kept entry exists with same humanKey within the dedupe window, skip this one
+            const keptTimes = humanThreadBuckets.get(humanKey) || [];
+            const withinWindow = keptTimes.some(t => Math.abs(t - f.sentDate.getTime()) <= this.CROSS_CONV_DEDUPE_WINDOW_MS);
+            if (withinWindow) {
+                // Duplicate across conversations for same human thread/timeframe
+                continue;
+            }
+
+            kept.push(f);
+            if (hasConvId) seenByConversation.add(convId);
+            humanThreadBuckets.set(humanKey, [...keptTimes, f.sentDate.getTime()]);
         }
-        return Array.from(map.values());
+
+        // Preserve original sort intention (the caller sorts later by priority/date); return in the same newest-first order here
+        return kept;
+    }
+
+    // Normalize subjects by removing common reply/forward prefixes and collapsing whitespace
+    private normalizeSubject(subject: string): string {
+        if (!subject) return '';
+        let s = subject.trim();
+        // Remove multiple stacked prefixes like Re:, Fwd:, FW:, SV:, VS:, Ответ:, etc.
+        // Common international variants included conservatively
+        const prefixRe = /^(re|fwd|fw|sv|vs|aw|答复|回复|rép|antwort|tr|rv|回复|ответ|отв|转发)\s*:\s*/i;
+        // Loop to strip repeated prefixes
+        while (prefixRe.test(s)) {
+            s = s.replace(prefixRe, '');
+            s = s.trim();
+        }
+        // Collapse internal whitespace and lowercase for stable matching
+        s = s.replace(/\s+/g, ' ').toLowerCase();
+        return s;
     }
 
     private async withRetry<T>(

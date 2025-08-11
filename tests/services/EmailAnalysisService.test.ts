@@ -731,6 +731,56 @@ describe('EmailAnalysisService', () => {
         expect(deduped).toHaveLength(1);
         expect(['x1']).toContain(deduped[0].id); // latest kept
       });
+
+      it('should dedupe across different conversationIds for same human thread within window', () => {
+        const now = new Date('2025-02-01T12:00:00Z');
+        const a = {
+          id: 'a1', subject: 'Re: Everest Insurance (UK)', recipients: ['oleksii@client.com'], sentDate: new Date(now.getTime() - 60_000),
+          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-1', hasAttachments: false,
+          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+        };
+        const b = {
+          id: 'b1', subject: 'FW: Everest Insurance (UK)', recipients: ['oleksii@client.com'], sentDate: now,
+          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-2', hasAttachments: false,
+          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+        };
+        // Different convIds, same normalized subject/participants, within 3-day window => dedupe to latest (b)
+        const deduped = (service as any).dedupeFollowupEmails([a, b]);
+        expect(deduped).toHaveLength(1);
+        expect(deduped[0].id).toBe('b1');
+      });
+
+      it('should not dedupe across conversationIds when outside the time window', () => {
+        const now = new Date('2025-02-01T12:00:00Z');
+        const a = {
+          id: 'a2', subject: 'Re: Project X', recipients: ['client@example.com'], sentDate: new Date(now.getTime() - (4 * 24 * 60 * 60 * 1000)),
+          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 4, conversationId: 'conv-10', hasAttachments: false,
+          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+        };
+        const b = {
+          id: 'b2', subject: 'FW: Project X', recipients: ['client@example.com'], sentDate: now,
+          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-11', hasAttachments: false,
+          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+        };
+        const deduped = (service as any).dedupeFollowupEmails([a, b]);
+        expect(deduped).toHaveLength(2);
+      });
+
+      it('should not dedupe when participants differ', () => {
+        const now = new Date('2025-02-01T12:00:00Z');
+        const a = {
+          id: 'a3', subject: 'Re: Topic A', recipients: ['alice@x.com'], sentDate: new Date(now.getTime() - 60_000),
+          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-20', hasAttachments: false,
+          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+        };
+        const b = {
+          id: 'b3', subject: 'FW: Topic A', recipients: ['bob@y.com'], sentDate: now,
+          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-21', hasAttachments: false,
+          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+        };
+        const deduped = (service as any).dedupeFollowupEmails([a, b]);
+        expect(deduped).toHaveLength(2);
+      });
     });
 
     describe('Enhanced Thread Retrieval', () => {
