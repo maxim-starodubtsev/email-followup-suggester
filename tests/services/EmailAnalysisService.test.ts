@@ -971,13 +971,14 @@ describe('EmailAnalysisService', () => {
         spyCreate.mockRestore();
       });
 
-      it('should fallback to folder then item retrieval when GetConversationItems returns empty', async () => {
+      it('should fallback to item retrieval when GetConversationItems returns empty', async () => {
         const convId = 'conv-fallback';
         const fallbackThread: ThreadMessage[] = [
           { id: 'fb1', subject: 'Need Help', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T09:00:00Z'), body: 'Need info', isFromCurrentUser: false },
           { id: 'fb2', subject: 'Re: Need Help', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Provided', isFromCurrentUser: true }
         ];
         const spyConvItems = jest.spyOn(service as any, 'getConversationItemsConversationCached').mockResolvedValue([]);
+        // Folder-based fallback removed from main path; ensure item-based fallback is used
         const spyFolderPath = jest.spyOn(service as any, 'getConversationThreadFromConversationIdCached').mockResolvedValue([]);
         const spyItem = jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue(fallbackThread);
         const spyCreate = jest.spyOn(service as any, 'createFollowupEmailEnhanced').mockImplementation(async (...args: any[]) => {
@@ -989,7 +990,7 @@ describe('EmailAnalysisService', () => {
         expect(result).not.toBeNull();
         expect(result.id).toBe('fb2');
         expect(spyConvItems).toHaveBeenCalledTimes(1);
-        expect(spyFolderPath).toHaveBeenCalledTimes(1);
+        expect(spyFolderPath).not.toHaveBeenCalled();
         expect(spyItem).toHaveBeenCalledTimes(1);
         spyConvItems.mockRestore();
         spyFolderPath.mockRestore();
