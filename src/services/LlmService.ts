@@ -129,17 +129,31 @@ Just return the classification word, nothing else.`;
 
     // Lightweight availability check – attempts a minimal completion.
     public async healthCheck(timeoutMs = 6000): Promise<boolean> {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            // Use a tiny prompt to minimize cost. Provider-specific logic happens in makeApiCall.
-            const response = await this.callLlmApi('Return the word OK', { maxTokens: 5 });
+            const attempt = async (): Promise<LlmResponse> => {
+                const controller = new AbortController();
+                const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+                try {
+                    return await this.makeApiCall('Return the word OK', { maxTokens: 5 }, controller.signal);
+                } finally {
+                    clearTimeout(timeoutHandle);
+                }
+            };
+
+            const response = await this.retryService.executeWithRetry(
+                attempt,
+                {
+                    maxAttempts: 2,
+                    baseDelayMs: 500,
+                    maxDelayMs: timeoutMs,
+                    backoffFactor: 2
+                },
+                'llm-health'
+            );
             return /\bOK\b/i.test(response.content.trim());
         } catch (e) {
             console.warn('[LLM HealthCheck] Failed:', (e as Error).message);
             return false;
-        } finally {
-            clearTimeout(timeout);
         }
     }
 
@@ -158,7 +172,7 @@ Just return the classification word, nothing else.`;
         );
     }
 
-    private async callDialAPI(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
+    private async callDialAPI(prompt: string, options: LlmOptions = {}, signal?: AbortSignal): Promise<LlmResponse> {
         const requestBody = {
             model: this.configuration.llmModel || 'gpt-35-turbo',
             messages: [
@@ -189,7 +203,8 @@ Just return the classification word, nothing else.`;
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers,
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            signal
         });
 
         if (!response.ok) {
@@ -215,7 +230,7 @@ Just return the classification word, nothing else.`;
         };
     }
 
-    private async callAzureOpenAI(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
+    private async callAzureOpenAI(prompt: string, options: LlmOptions = {}, signal?: AbortSignal): Promise<LlmResponse> {
         const requestBody = {
             messages: [
                 { role: 'user', content: prompt }
@@ -239,7 +254,8 @@ Just return the classification word, nothing else.`;
                 'Content-Type': 'application/json',
                 'api-key': this.configuration.llmApiKey!
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            signal
         });
 
         if (!response.ok) {
@@ -265,7 +281,7 @@ Just return the classification word, nothing else.`;
         };
     }
 
-    private async callOpenAI(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
+    private async callOpenAI(prompt: string, options: LlmOptions = {}, signal?: AbortSignal): Promise<LlmResponse> {
         const requestBody = {
             model: this.configuration.llmModel || 'gpt-3.5-turbo',
             messages: [
@@ -288,7 +304,8 @@ Just return the classification word, nothing else.`;
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${this.configuration.llmApiKey}`
             },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify(requestBody),
+            signal
         });
 
         if (!response.ok) {
@@ -314,7 +331,7 @@ Just return the classification word, nothing else.`;
         };
     }
 
-    private async makeApiCall(prompt: string, options: LlmOptions = {}): Promise<LlmResponse> {
+    private async makeApiCall(prompt: string, options: LlmOptions = {}, signal?: AbortSignal): Promise<LlmResponse> {
         // Check if API endpoint is configured
         if (!this.configuration.llmApiEndpoint) {
             throw new Error('LLM API endpoint is not configured');
@@ -325,20 +342,20 @@ Just return the classification word, nothing else.`;
 
         switch (provider) {
             case 'dial':
-                return this.callDialAPI(prompt, options);
+                return this.callDialAPI(prompt, options, signal);
             case 'azure':
-                return this.callAzureOpenAI(prompt, options);
+                return this.callAzureOpenAI(prompt, options, signal);
             case 'openai':
-                return this.callOpenAI(prompt, options);
+                return this.callOpenAI(prompt, options, signal);
             default:
                 // Fallback to auto-detection
                 if (this.configuration.llmApiEndpoint.includes('ai-proxy.lab.epam.com') || 
                     this.configuration.llmApiEndpoint.includes('/openai/deployments/')) {
-                    return this.callDialAPI(prompt, options);
+                    return this.callDialAPI(prompt, options, signal);
                 } else if (this.configuration.llmApiEndpoint.includes('openai.azure.com')) {
-                    return this.callAzureOpenAI(prompt, options);
+                    return this.callAzureOpenAI(prompt, options, signal);
                 } else {
-                    return this.callOpenAI(prompt, options);
+                    return this.callOpenAI(prompt, options, signal);
                 }
         }
     }

@@ -39,8 +39,8 @@ export class ConfigurationService {
         // DIAL API default configuration
         llmProvider: 'dial',
         llmApiEndpoint: 'https://ai-proxy.lab.epam.com',
-        llmModel: 'gpt-4.1-2025-04-14',
-        llmApiKey: 'dial-qjboupii21tb26eakd3ytcsb9po',
+    llmModel: 'gpt-4.1-2025-04-14',
+    llmApiKey: '',
         llmApiVersion: '2025-04-14',
         llmDeploymentName: 'gpt-4.1-2025-04-14',
         selectedAccounts: [],

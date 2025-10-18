@@ -41,7 +41,14 @@ export class BatchProcessor {
         options: Partial<BatchProcessingOptions> = {}
     ): Promise<BatchResult<TOutput>> {
         const processingId = this.generateProcessingId();
-        const mergedOptions = { ...this.DEFAULT_OPTIONS, ...options };
+        const mergedOptions: BatchProcessingOptions = {
+            ...this.DEFAULT_OPTIONS,
+            ...options,
+            retryOptions: {
+                ...this.DEFAULT_OPTIONS.retryOptions,
+                ...(options.retryOptions ?? {})
+            }
+        };
         const startTime = Date.now();
 
         // Initialize cancellation token

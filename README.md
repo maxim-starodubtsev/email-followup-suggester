@@ -134,9 +134,9 @@ Followup Suggester/
 
 The add-in comes pre-configured with DIAL API credentials:
 
-- **Endpoint**: `https://ai-proxy.lab.epam.com`
-- **API Key**: `dial-qjboupii21tb26eakd3ytcsb9po`
-- **Model**: `gpt-4o-mini-2024-07-18`
+- **Endpoint**: `<Endpoint URL>`
+- **API Key**: `<API key>`
+- **Model**: `<model name>`
 
 ### Customizing Settings
 

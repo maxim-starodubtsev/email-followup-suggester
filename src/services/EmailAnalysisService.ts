@@ -55,6 +55,9 @@ export class EmailAnalysisService {
         averageProcessingTime: 0
     };
 
+    private readonly debugEnabled: boolean;
+    private readonly cacheKeyIndex: Map<string, Set<string>> = new Map();
+
     private batchProcessor: BatchProcessor;
     private xmlParsingService: XmlParsingService;
     // Cache of recent emails for artificial thread building in fallback mode
@@ -74,6 +77,8 @@ export class EmailAnalysisService {
             enableStatistics: true
         });
 
+        this.debugEnabled = this.shouldEnableDebug();
+
         // Keep references to optional fallback methods so TS doesn't flag them as unused when wired only in tests
         if (false) {
             // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -90,36 +95,36 @@ export class EmailAnalysisService {
     }
 
     public async analyzeEmails(emailCount: number, daysBack: number, selectedAccounts: string[]): Promise<FollowupEmail[]> {
-        console.log(`[DEBUG] Starting analyzeEmails - Count: ${emailCount}, Days: ${daysBack}, Accounts: ${JSON.stringify(selectedAccounts)}`);
+    this.logDebug(`[DEBUG] Starting analyzeEmails - Count: ${emailCount}, Days: ${daysBack}, Accounts: ${JSON.stringify(selectedAccounts)}`);
         
         const startTime = Date.now();
         this.trackAnalyticsEvent('batch_processed', { emailCount, daysBack, selectedAccounts });
 
         try {
             const currentUserEmail = Office.context.mailbox.userProfile.emailAddress;
-            console.log(`[DEBUG] Current user email: ${currentUserEmail}`);
+            this.logDebug(`[DEBUG] Current user email: ${currentUserEmail}`);
             
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-            console.log(`[DEBUG] Cutoff date: ${cutoffDate.toISOString()}`);
+            this.logDebug(`[DEBUG] Cutoff date: ${cutoffDate.toISOString()}`);
 
             // Get recent emails across multiple folders (not just Sent) with caching and retry
             // This implements requirement to analyze emails across all folders
             const recentEmails = await this.getRecentEmailsWithCaching(emailCount, cutoffDate);
-            console.log(`[DEBUG] Retrieved ${recentEmails.length} recent emails across folders`);
+            this.logDebug(`[DEBUG] Retrieved ${recentEmails.length} recent emails across folders`);
             // Persist recent emails for use in artificial thread reconstruction (single-email fallback)
             try { this.recentEmailsContext = recentEmails as unknown as ParsedEmail[]; } catch { this.recentEmailsContext = []; }
 
             // Group emails by conversation ID
             const conversationGroups = this.groupEmailsByConversation(recentEmails);
             const conversationIds = Array.from(conversationGroups.keys());
-            console.log(`[DEBUG] Grouped into ${conversationIds.length} conversation groups`);
+            this.logDebug(`[DEBUG] Grouped into ${conversationIds.length} conversation groups`);
             
             // Log conversation details
             conversationGroups.forEach((emails, conversationId) => {
-                console.log(`[DEBUG] Conversation ${conversationId}: ${emails.length} emails`);
+                this.logDebug(`[DEBUG] Conversation ${conversationId}: ${emails.length} emails`);
                 emails.forEach((email, index) => {
-                    console.log(`[DEBUG]   Email ${index + 1}: "${email.subject}" sent ${email.dateTimeSent}`);
+                    this.logDebug(`[DEBUG]   Email ${index + 1}: "${email.subject}" sent ${email.dateTimeSent}`);
                 });
             });
 
@@ -167,14 +172,14 @@ export class EmailAnalysisService {
             // Dedupe by conversation to avoid multiple entries from same thread
             followupEmails = this.dedupeFollowupEmails(followupEmails);
 
-            console.log(`[DEBUG] Final result: ${followupEmails.length} emails need followup out of ${recentEmails.length} retrieved emails`);
+            this.logDebug(`[DEBUG] Final result: ${followupEmails.length} emails need followup out of ${recentEmails.length} retrieved emails`);
             
             if (followupEmails.length === 0) {
-                console.log(`[DEBUG] No followup emails found. This could mean:`);
-                console.log(`[DEBUG] - All emails have been replied to`);
-                console.log(`[DEBUG] - You weren't the last person to send in the conversations`);
-                console.log(`[DEBUG] - All emails are outside the time window`);
-                console.log(`[DEBUG] - Account filtering excluded all emails`);
+                this.logDebug(`[DEBUG] No followup emails found. This could mean:`);
+                this.logDebug(`[DEBUG] - All emails have been replied to`);
+                this.logDebug(`[DEBUG] - You weren't the last person to send in the conversations`);
+                this.logDebug(`[DEBUG] - All emails are outside the time window`);
+                this.logDebug(`[DEBUG] - Account filtering excluded all emails`);
             }
 
             // Log batch processing results with cache stats
@@ -272,7 +277,7 @@ export class EmailAnalysisService {
     }
 
     // Enhanced email analysis with sentiment and context
-    public async analyzeEmailSentiment(emailBody: string): Promise<'positive' | 'neutral' | 'negative' | 'urgent'> {
+    public async analyzeEmailSentiment(emailBody: string, referenceId?: string): Promise<'positive' | 'neutral' | 'negative' | 'urgent'> {
         // Check cache first
         const cacheKey = this.generateCacheKey('sentiment', emailBody);
         const cachedSentiment = this.cacheService.get<'positive' | 'neutral' | 'negative' | 'urgent'>(cacheKey);
@@ -290,6 +295,7 @@ export class EmailAnalysisService {
             
             // Cache the result
             this.cacheService.set(cacheKey, sentiment, 6 * 60 * 60 * 1000); // 6 hours for sentiment
+            this.registerCacheKey(referenceId, cacheKey);
             
             return sentiment;
         } catch (error) {
@@ -470,7 +476,7 @@ export class EmailAnalysisService {
         const firstEmail = conversationEmails[0];
         const emailItemId = firstEmail.id;
         
-        console.log(`[DEBUG] Processing conversation ${conversationId} with email ID ${emailItemId}`);
+    this.logDebug(`[DEBUG] Processing conversation ${conversationId} with email ID ${emailItemId}`);
         
     // Prefer using conversation APIs (GetConversationItems), else fall back to item-based retrieval seeded by the email
         let threadMessages: ThreadMessage[] = [];
@@ -487,74 +493,79 @@ export class EmailAnalysisService {
         // If we only have a single message (fallback path), try to build an artificial thread by scanning recent emails
         if (threadMessages.length <= 1) {
             const base = threadMessages[0];
-            console.log(`[DEBUG] 🔎 SINGLE-EMAIL FALLBACK engaged for conversation ${conversationId}. Attempting artificial chain...`);
+            this.logDebug(`[DEBUG] 🔎 SINGLE-EMAIL FALLBACK engaged for conversation ${conversationId}. Attempting artificial chain...`);
             const artificial = this.buildArtificialThreadFromRecentEmails(base, currentUserEmail);
             if (artificial.length > 1) {
-                console.log(`[DEBUG] 🧩 Artificial thread assembled with ${artificial.length} messages (fallback mode)`);
+                this.logDebug(`[DEBUG] 🧩 Artificial thread assembled with ${artificial.length} messages (fallback mode)`);
                 threadMessages = artificial;
             } else {
                 // Safety suppression: if newer same-subject mail(s) from others exist, do not mark follow-up
                 if (base && this.hasNewerOtherWithSameSubject(base, currentUserEmail)) {
-                    console.log(`[DEBUG] ❌ SUPPRESSED: Newer same-subject email from OTHER user exists. Not a follow-up.`);
+                    this.logDebug(`[DEBUG] ❌ SUPPRESSED: Newer same-subject email from OTHER user exists. Not a follow-up.`);
                     this.trackAnalyticsEvent('artificial_chain_skipped', {
                         reason: 'suppressed_by_newer_other',
                         baseId: base.id,
                         subject: this.normalizeSubject(base.subject || '')
                     });
                     this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+                    this.registerCacheKey([conversationId, base.id], cacheKey);
                     return null;
                 }
-                console.log(`[DEBUG] ⚠️ Artificial chain not formed; proceeding with single-message evaluation.`);
+                this.logDebug(`[DEBUG] ⚠️ Artificial chain not formed; proceeding with single-message evaluation.`);
             }
         }
-        console.log(`[DEBUG] Retrieved ${threadMessages.length} thread messages for conversation ${conversationId}`);
+    this.logDebug(`[DEBUG] Retrieved ${threadMessages.length} thread messages for conversation ${conversationId}`);
         
         // Log all messages in the thread for debugging
         threadMessages.forEach((msg, index) => {
-            console.log(`[DEBUG] Thread message ${index + 1}: From "${msg.from}" (${msg.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'}) at ${msg.sentDate.toISOString()}`);
-            console.log(`[DEBUG]   Subject: "${msg.subject}"`);
+            this.logDebug(`[DEBUG] Thread message ${index + 1}: From "${msg.from}" (${msg.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'}) at ${msg.sentDate.toISOString()}`);
+            this.logDebug(`[DEBUG]   Subject: "${msg.subject}"`);
         });
         
         // Check if the last email in thread was sent by current user
         const lastMessage = this.getLastMessageInThread(threadMessages);
         if (!lastMessage) {
-            console.log(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - No messages found in thread`);
+            this.logDebug(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - No messages found in thread`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+            this.registerCacheKey(conversationId, cacheKey);
             return null;
         }
 
-        console.log(`[DEBUG] Last message in thread: From "${lastMessage.from}" (${lastMessage.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'}) at ${lastMessage.sentDate.toISOString()}`);
+    this.logDebug(`[DEBUG] Last message in thread: From "${lastMessage.from}" (${lastMessage.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'}) at ${lastMessage.sentDate.toISOString()}`);
         
         if (!lastMessage.isFromCurrentUser) {
-            console.log(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Last message NOT from current user`);
-            console.log(`[DEBUG]   Last message from: "${lastMessage.from}"`);
-            console.log(`[DEBUG]   Current user: "${currentUserEmail}"`);
-            console.log(`[DEBUG]   This email thread will NOT be shown as it doesn't need followup`);
+            this.logDebug(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Last message NOT from current user`);
+            this.logDebug(`[DEBUG]   Last message from: "${lastMessage.from}"`);
+            this.logDebug(`[DEBUG]   Current user: "${currentUserEmail}"`);
+            this.logDebug(`[DEBUG]   This email thread will NOT be shown as it doesn't need followup`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+            this.registerCacheKey([conversationId, lastMessage.id], cacheKey);
             return null;
         }
 
-        console.log(`[DEBUG] ✅ PASSED: Last message IS from current user - checking for responses`);
+    this.logDebug(`[DEBUG] ✅ PASSED: Last message IS from current user - checking for responses`);
 
         // Check if there's been a response after the last sent message
         const hasResponse = this.checkForResponseInThread(threadMessages, lastMessage.sentDate);
         if (hasResponse) {
-            console.log(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Has response after last sent message`);
-            console.log(`[DEBUG]   This email thread will NOT be shown as it has been responded to`);
+            this.logDebug(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Has response after last sent message`);
+            this.logDebug(`[DEBUG]   This email thread will NOT be shown as it has been responded to`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+            this.registerCacheKey([conversationId, lastMessage.id], cacheKey);
             return null;
         }
 
-        console.log(`[DEBUG] ✅ PASSED: No responses after last sent message`);
+    this.logDebug(`[DEBUG] ✅ PASSED: No responses after last sent message`);
 
         // Filter by selected accounts if specified
         if (selectedAccounts.length > 0 && !selectedAccounts.includes(lastMessage.from)) {
-            console.log(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Account filter (${lastMessage.from} not in selected accounts)`);
+            this.logDebug(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Account filter (${lastMessage.from} not in selected accounts)`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+            this.registerCacheKey([conversationId, lastMessage.id], cacheKey);
             return null;
         }
 
-        console.log(`[DEBUG] ✅ PASSED: Account filter check`);
+    this.logDebug(`[DEBUG] ✅ PASSED: Account filter check`);
 
         // Check if email is snoozed or dismissed (respect user preferences)
         const isSnoozed = this.isEmailSnoozed(lastMessage.id);
@@ -562,18 +573,20 @@ export class EmailAnalysisService {
         
         if ((isSnoozed && !(this.configuration?.showSnoozedEmails)) || 
             (isDismissed && !(this.configuration?.showDismissedEmails))) {
-            console.log(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Email is snoozed or dismissed (user setting)`);
+            this.logDebug(`[DEBUG] ❌ FILTERED: Conversation ${conversationId} - Email is snoozed or dismissed (user setting)`);
             this.cacheService.set(cacheKey, null, 5 * 60 * 1000);
+            this.registerCacheKey([conversationId, lastMessage.id], cacheKey);
             return null;
         }
 
-        console.log(`[DEBUG] ✅ PASSED: Snooze/dismiss filter`);
-        console.log(`[DEBUG] 🎯 CREATING FOLLOWUP EMAIL for conversation ${conversationId}`);
+    this.logDebug(`[DEBUG] ✅ PASSED: Snooze/dismiss filter`);
+    this.logDebug(`[DEBUG] 🎯 CREATING FOLLOWUP EMAIL for conversation ${conversationId}`);
 
     const followupEmail = await this.createFollowupEmailEnhanced(conversationId, lastMessage, threadMessages, currentUserEmail);
         
         // Cache the analysis result
         this.cacheService.set(cacheKey, followupEmail);
+        this.registerCacheKey([conversationId, followupEmail.id], cacheKey);
         
         return followupEmail;
     }
@@ -596,6 +609,8 @@ export class EmailAnalysisService {
         
         // Cache thread data for 20 minutes
         this.cacheService.set(cacheKey, thread, 20 * 60 * 1000);
+        const threadIds = thread.map(message => message.id);
+        this.registerCacheKey([emailItemId, ...threadIds], cacheKey);
         return thread;
     }
 
@@ -614,6 +629,8 @@ export class EmailAnalysisService {
             this.DEFAULT_RETRY_OPTIONS
         );
         this.cacheService.set(cacheKey, messages, 20 * 60 * 1000);
+        const messageIds = messages.map(message => message.id);
+        this.registerCacheKey([conversationId, ...messageIds], cacheKey);
         return messages;
     }
 
@@ -632,6 +649,8 @@ export class EmailAnalysisService {
             this.DEFAULT_RETRY_OPTIONS
         );
         this.cacheService.set(cacheKey, messages, 20 * 60 * 1000);
+        const messageIds = messages.map(message => message.id);
+        this.registerCacheKey([conversationId, ...messageIds], cacheKey);
         return messages;
     }
 
@@ -790,6 +809,53 @@ export class EmailAnalysisService {
         }
     }
 
+    private shouldEnableDebug(): boolean {
+        try {
+            if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+                return localStorage.getItem('followup-debug') === 'true';
+            }
+        } catch {
+            // Ignore storage access issues and fall back to defaults
+        }
+        return false;
+    }
+
+    private logDebug(message: string, ...optionalParams: unknown[]): void {
+        if (!this.debugEnabled) {
+            return;
+        }
+        console.debug(message, ...optionalParams);
+    }
+
+    private registerCacheKey(referenceIds: string | string[] | undefined, cacheKey: string): void {
+        if (!referenceIds) {
+            return;
+        }
+        const ids = Array.isArray(referenceIds) ? referenceIds : [referenceIds];
+        ids.forEach((rawId) => {
+            if (!rawId) {
+                return;
+            }
+            const trimmed = rawId.trim();
+            if (!trimmed) {
+                return;
+            }
+            const existing = this.cacheKeyIndex.get(trimmed) ?? new Set<string>();
+            existing.add(cacheKey);
+            this.cacheKeyIndex.set(trimmed, existing);
+        });
+    }
+
+    private detachCacheKeyFromAllIds(cacheKey: string): void {
+        const idsToDelete: string[] = [];
+        this.cacheKeyIndex.forEach((keys, id) => {
+            if (keys.delete(cacheKey) && keys.size === 0) {
+                idsToDelete.push(id);
+            }
+        });
+        idsToDelete.forEach((id) => this.cacheKeyIndex.delete(id));
+    }
+
     private generateCacheKey(prefix: string, data: any): string {
         try {
             // Create deterministic hash for consistent caching using a simple hash function
@@ -814,18 +880,19 @@ export class EmailAnalysisService {
     }
 
     private invalidateEmailCaches(emailIds: string[]): void {
-        // Invalidate related cache entries when emails are modified
-        emailIds.forEach(emailId => {
-            const patterns = [
-                new RegExp(`email:analysis:.*${emailId}`),
-                new RegExp(`email:thread:.*${emailId}`),
-                new RegExp(`email:sentiment:.*${emailId}`)
-            ];
-            
-            patterns.forEach(pattern => {
-                this.cacheService.bulkInvalidate(pattern);
+        emailIds.forEach((emailId) => {
+            const keys = this.cacheKeyIndex.get(emailId);
+            if (!keys) {
+                return;
+            }
+
+            Array.from(keys).forEach((cacheKey) => {
+                this.cacheService.invalidate(cacheKey);
+                this.detachCacheKeyFromAllIds(cacheKey);
             });
         });
+
+        emailIds.forEach((emailId) => this.cacheKeyIndex.delete(emailId));
     }
 
     // Snooze and dismiss functionality
@@ -943,7 +1010,7 @@ export class EmailAnalysisService {
     }
 
     private parseSentEmailsResponse(xmlResponse: string): ParsedEmail[] {
-        console.log(`[DEBUG] Parsing EWS FindItem response using XmlParsingService`);
+    this.logDebug(`[DEBUG] Parsing EWS FindItem response using XmlParsingService`);
         
         // Validate the XML response first
         const validation = this.xmlParsingService.validateEwsResponse(xmlResponse);
@@ -954,18 +1021,18 @@ export class EmailAnalysisService {
         
         // Use the new parsing service
         const emails = this.xmlParsingService.parseFindItemResponse(xmlResponse);
-        console.log(`[DEBUG] XmlParsingService parsed ${emails.length} emails`);
+    this.logDebug(`[DEBUG] XmlParsingService parsed ${emails.length} emails`);
         
         // Log details for first few emails
         emails.slice(0, 3).forEach((email, index) => {
-            console.log(`[DEBUG] Email ${index + 1}: Subject="${email.subject}", Date=${email.dateTimeSent}, From=${email.from.emailAddress.address}`);
+            this.logDebug(`[DEBUG] Email ${index + 1}: Subject="${email.subject}", Date=${email.dateTimeSent}, From=${email.from.emailAddress.address}`);
         });
         
         return emails;
     }
 
     private async getConversationThread(emailItemId: string): Promise<ThreadMessage[]> {
-        console.log(`[DEBUG] 🧵 THREAD RETRIEVAL: Getting conversation thread for email ID: ${emailItemId}`);
+    this.logDebug(`[DEBUG] 🧵 THREAD RETRIEVAL: Getting conversation thread for email ID: ${emailItemId}`);
         
         return new Promise((resolve, reject) => {
             // First get the conversation ID from the email
@@ -976,32 +1043,32 @@ export class EmailAnalysisService {
                         try {
                             const conversationId = this.parseConversationIdResponse(result.value);
                             if (!conversationId) {
-                                console.log(`[DEBUG] 📧 SINGLE EMAIL: No conversation ID found, treating as single email thread`);
+                                this.logDebug(`[DEBUG] 📧 SINGLE EMAIL: No conversation ID found, treating as single email thread`);
                                 const singleMessage = this.parseConversationResponse(result.value);
-                                console.log(`[DEBUG] 📧 SINGLE EMAIL RESULT: ${singleMessage.length} message(s) parsed`);
+                                this.logDebug(`[DEBUG] 📧 SINGLE EMAIL RESULT: ${singleMessage.length} message(s) parsed`);
                                 resolve(singleMessage);
                                 return;
                             }
-                            console.log(`[DEBUG] 🔗 CONVERSATION FOUND: ID = ${conversationId}, fetching via GetConversationItems`);
+                            this.logDebug(`[DEBUG] 🔗 CONVERSATION FOUND: ID = ${conversationId}, fetching via GetConversationItems`);
                             try {
                                 const convMessages = await this.getConversationItems(conversationId);
                                 if (convMessages.length > 0) {
-                                    console.log(`[DEBUG] 🎯 THREAD COMPLETE: Retrieved ${convMessages.length} messages via GetConversationItems`);
+                                    this.logDebug(`[DEBUG] 🎯 THREAD COMPLETE: Retrieved ${convMessages.length} messages via GetConversationItems`);
                                     // Log the complete thread structure
-                                    console.log(`[DEBUG] 📋 COMPLETE THREAD STRUCTURE:`);
+                                    this.logDebug(`[DEBUG] 📋 COMPLETE THREAD STRUCTURE:`);
                                     convMessages.forEach((msg, index) => {
-                                        console.log(`[DEBUG]   ${index + 1}. ${msg.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'} - ${msg.sentDate.toISOString()} - "${msg.subject}"`);
+                                        this.logDebug(`[DEBUG]   ${index + 1}. ${msg.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'} - ${msg.sentDate.toISOString()} - "${msg.subject}"`);
                                     });
                                     resolve(convMessages);
                                 } else {
-                                    console.log(`[DEBUG] ⚠️ FALLBACK: GetConversationItems returned no messages, falling back to single message`);
+                                    this.logDebug(`[DEBUG] ⚠️ FALLBACK: GetConversationItems returned no messages, falling back to single message`);
                                     const singleMessage = this.parseConversationResponse(result.value);
                                     resolve(singleMessage);
                                 }
                             } catch (convErr) {
                                 console.error('[ERROR] 💥 THREAD FETCH FAILED: GetConversationItems after GetItem failed:', convErr);
                                 const singleMessage = this.parseConversationResponse(result.value);
-                                console.log(`[DEBUG] 🔄 FALLBACK COMPLETE: Using single message instead`);
+                                this.logDebug(`[DEBUG] 🔄 FALLBACK COMPLETE: Using single message instead`);
                                 resolve(singleMessage);
                             }
                         } catch (error) {
@@ -1018,7 +1085,7 @@ export class EmailAnalysisService {
     }
 
     private parseConversationResponse(xmlResponse: string): ThreadMessage[] {
-        console.log(`[DEBUG] Parsing EWS GetItem response to extract email details`);
+    this.logDebug(`[DEBUG] Parsing EWS GetItem response to extract email details`);
         
         const currentUserEmail = Office.context.mailbox.userProfile.emailAddress.toLowerCase();
         
@@ -1046,7 +1113,7 @@ export class EmailAnalysisService {
                 messageElements = combined as unknown as HTMLCollectionOf<Element>;
             }
             if (messageElements.length === 0) {
-                console.log(`[DEBUG] No message found in GetItem response`);
+                this.logDebug(`[DEBUG] No message found in GetItem response`);
                 return [];
             }
             
@@ -1054,10 +1121,10 @@ export class EmailAnalysisService {
             const threadMessage = this.parseMessageElement(messageElement, currentUserEmail);
             
             if (threadMessage) {
-                console.log(`[DEBUG] Successfully parsed single email: "${threadMessage.subject}" from ${threadMessage.from} (${threadMessage.isFromCurrentUser ? 'current user' : 'other'})`);
+                this.logDebug(`[DEBUG] Successfully parsed single email: "${threadMessage.subject}" from ${threadMessage.from} (${threadMessage.isFromCurrentUser ? 'current user' : 'other'})`);
                 return [threadMessage];
             } else {
-                console.log(`[DEBUG] Failed to parse message element`);
+                this.logDebug(`[DEBUG] Failed to parse message element`);
                 return [];
             }
             
@@ -1114,26 +1181,26 @@ export class EmailAnalysisService {
                 const candSig = this.normalizeBodyForMatch(candBody);
                 if (baseSig && baseSig.length >= 20 && candSig.indexOf(baseSig) !== -1) {
                     matched++;
-                    console.log(`[DEBUG] Newer other-user email (${e.id}) matches by subject and body containment.`);
+                    this.logDebug(`[DEBUG] Newer other-user email (${e.id}) matches by subject and body containment.`);
                     return true;
                 }
 
                 // Otherwise, accept subject+participant overlap as a suppression signal
                 matched++;
-                console.log(`[DEBUG] Newer other-user email (${e.id}) matches by subject and participants overlap.`);
+                this.logDebug(`[DEBUG] Newer other-user email (${e.id}) matches by subject and participants overlap.`);
         return true;
             } catch {
                 continue;
             }
         }
 
-    console.log(`[DEBUG] Newer-other suppression scan: considered=${considered}, matched=${matched} for subject="${normSubject}" | skips: ${JSON.stringify(skipCounters)}`);
+        this.logDebug(`[DEBUG] Newer-other suppression scan: considered=${considered}, matched=${matched} for subject="${normSubject}" | skips: ${JSON.stringify(skipCounters)}`);
         return false;
     }
 
     private getLastMessageInThread(threadMessages: ThreadMessage[]): ThreadMessage | null {
         if (threadMessages.length === 0) {
-            console.log(`[DEBUG] ❌ EMPTY THREAD: No messages in thread`);
+            this.logDebug(`[DEBUG] ❌ EMPTY THREAD: No messages in thread`);
             return null;
         }
         // Determine most recent using receivedDate when present (fallback to sentDate)
@@ -1144,28 +1211,28 @@ export class EmailAnalysisService {
         });
         const lastMessage = sortedMessages[0];
         
-        console.log(`[DEBUG] 🏁 LAST MESSAGE IDENTIFIED:`);
-        console.log(`[DEBUG]   From: "${lastMessage.from}" (${lastMessage.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'})`);
-        console.log(`[DEBUG]   Subject: "${lastMessage.subject}"`);
-        console.log(`[DEBUG]   Date: ${(lastMessage.receivedDate || lastMessage.sentDate).toISOString()} (received vs sent basis)`);
-        console.log(`[DEBUG]   Thread size: ${threadMessages.length} messages`);
+    this.logDebug(`[DEBUG] 🏁 LAST MESSAGE IDENTIFIED:`);
+    this.logDebug(`[DEBUG]   From: "${lastMessage.from}" (${lastMessage.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'})`);
+    this.logDebug(`[DEBUG]   Subject: "${lastMessage.subject}"`);
+    this.logDebug(`[DEBUG]   Date: ${(lastMessage.receivedDate || lastMessage.sentDate).toISOString()} (received vs sent basis)`);
+    this.logDebug(`[DEBUG]   Thread size: ${threadMessages.length} messages`);
         
         return lastMessage;
     }
 
     private checkForResponseInThread(threadMessages: ThreadMessage[], lastSentDate: Date): boolean {
-        console.log(`[DEBUG] 🔍 THREAD ANALYSIS: Checking for responses after ${lastSentDate.toISOString()}`);
-        console.log(`[DEBUG] Thread has ${threadMessages.length} messages total`);
+    this.logDebug(`[DEBUG] 🔍 THREAD ANALYSIS: Checking for responses after ${lastSentDate.toISOString()}`);
+    this.logDebug(`[DEBUG] Thread has ${threadMessages.length} messages total`);
         
         // Sort messages by date to ensure chronological order
         const sortedMessages = [...threadMessages].sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
         
-        console.log(`[DEBUG] Chronological message order:`);
+        this.logDebug(`[DEBUG] Chronological message order:`);
         sortedMessages.forEach((message, index) => {
             const baseDate = (message.receivedDate || message.sentDate);
             const timeStatus = baseDate > lastSentDate ? 'AFTER' : 'BEFORE';
             const userStatus = message.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER';
-            console.log(`[DEBUG]   ${index + 1}. ${timeStatus} last sent: ${userStatus} at ${baseDate.toISOString()}`);
+            this.logDebug(`[DEBUG]   ${index + 1}. ${timeStatus} last sent: ${userStatus} at ${baseDate.toISOString()}`);
         });
         
         // Find all messages after the last sent date that are not from current user
@@ -1173,24 +1240,24 @@ export class EmailAnalysisService {
             const isAfterLastSent = message.sentDate > lastSentDate;
             const isFromOther = !message.isFromCurrentUser;
             
-            console.log(`[DEBUG] Evaluating message from ${message.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'} at ${message.sentDate.toISOString()}: ` +
+            this.logDebug(`[DEBUG] Evaluating message from ${message.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'} at ${message.sentDate.toISOString()}: ` +
                        `after last sent = ${isAfterLastSent}, from other = ${isFromOther}`);
             
             return isAfterLastSent && isFromOther;
         });
         
         const hasResponse = responsesAfterLastSent.length > 0;
-        console.log(`[DEBUG] 📧 RESPONSE ANALYSIS: Found ${responsesAfterLastSent.length} responses after last sent message`);
+        this.logDebug(`[DEBUG] 📧 RESPONSE ANALYSIS: Found ${responsesAfterLastSent.length} responses after last sent message`);
         
         if (hasResponse) {
-            console.log(`[DEBUG] ✅ RESPONSES FOUND:`);
+            this.logDebug(`[DEBUG] ✅ RESPONSES FOUND:`);
             responsesAfterLastSent.forEach((response, index) => {
-                console.log(`[DEBUG]   Response ${index + 1}: from ${response.from} at ${response.sentDate.toISOString()}`);
-                console.log(`[DEBUG]     Subject: "${response.subject}"`);
+                this.logDebug(`[DEBUG]   Response ${index + 1}: from ${response.from} at ${response.sentDate.toISOString()}`);
+                this.logDebug(`[DEBUG]     Subject: "${response.subject}"`);
             });
-            console.log(`[DEBUG] 🔒 This thread will be FILTERED OUT because it has responses`);
+            this.logDebug(`[DEBUG] 🔒 This thread will be FILTERED OUT because it has responses`);
         } else {
-            console.log(`[DEBUG] ❌ NO RESPONSES FOUND - This thread NEEDS FOLLOWUP`);
+            this.logDebug(`[DEBUG] ❌ NO RESPONSES FOUND - This thread NEEDS FOLLOWUP`);
         }
         
         return hasResponse;
@@ -1256,7 +1323,7 @@ export class EmailAnalysisService {
                         emails: threadMessages,
                         context: `User email: ${currentUserEmail}`
                     }),
-                    this.analyzeEmailSentiment(lastMessage.body)
+                    this.analyzeEmailSentiment(lastMessage.body, lastMessage.id)
                 ]);
                 
                 llmSummary = llmResponse; // analyzeThread returns a string, not an object
@@ -1481,7 +1548,7 @@ export class EmailAnalysisService {
 
     // Helper methods for enhanced thread analysis
     private async searchConversationAcrossFolders(conversationId: string): Promise<ThreadMessage[]> {
-        console.log(`[DEBUG] Searching for conversation ${conversationId} across multiple folders`);
+    this.logDebug(`[DEBUG] Searching for conversation ${conversationId} across multiple folders`);
         
         // Include root (deep traversal) to satisfy requirement: analyze across all folders & sub-folders
         // Order chosen to prioritise cheaper targeted folders before deep mailbox scan
@@ -1498,14 +1565,14 @@ export class EmailAnalysisService {
         
         for (const folder of folders) {
             try {
-                console.log(`[DEBUG] Searching in folder: ${folder}`);
+                this.logDebug(`[DEBUG] Searching in folder: ${folder}`);
                 const folderMessages = await this.searchConversationInFolder(conversationId, folder);
                 allMessages.push(...folderMessages);
-                console.log(`[DEBUG] Found ${folderMessages.length} messages in ${folder}`);
+                this.logDebug(`[DEBUG] Found ${folderMessages.length} messages in ${folder}`);
                 
                 // Debug: Log each message found in this folder
                 folderMessages.forEach((msg, index) => {
-                    console.log(`[DEBUG] Folder ${folder} message ${index + 1}: ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
+                    this.logDebug(`[DEBUG] Folder ${folder} message ${index + 1}: ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
                 });
             } catch (error) {
                 console.warn(`[WARN] Failed to search in folder ${folder}:`, error);
@@ -1513,32 +1580,32 @@ export class EmailAnalysisService {
             }
         }
         
-        console.log(`[DEBUG] Total messages before deduplication: ${allMessages.length}`);
+    this.logDebug(`[DEBUG] Total messages before deduplication: ${allMessages.length}`);
         allMessages.forEach((msg, index) => {
-            console.log(`[DEBUG] Before dedup ${index + 1}: ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
+            this.logDebug(`[DEBUG] Before dedup ${index + 1}: ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
         });
         
         // Remove duplicates based on message ID
         const uniqueMessages = this.removeDuplicateMessages(allMessages);
         
-        console.log(`[DEBUG] Total messages after deduplication: ${uniqueMessages.length}`);
+    this.logDebug(`[DEBUG] Total messages after deduplication: ${uniqueMessages.length}`);
         uniqueMessages.forEach((msg, index) => {
-            console.log(`[DEBUG] After dedup ${index + 1}: ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
+            this.logDebug(`[DEBUG] After dedup ${index + 1}: ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
         });
         
         // CRITICAL FIX: Ensure chronological sort (earliest first) with proper comparison
-        console.log(`[DEBUG] Applying final chronological sort (earliest first)...`);
+    this.logDebug(`[DEBUG] Applying final chronological sort (earliest first)...`);
         const sortedMessages = [...uniqueMessages].sort((a, b) => {
             const timeA = a.sentDate.getTime();
             const timeB = b.sentDate.getTime();
             const diff = timeA - timeB; // Ascending order: earlier dates first
-            console.log(`[DEBUG] Sort comparison: ${a.id} (${timeA}) vs ${b.id} (${timeB}) = ${diff} ${diff < 0 ? '(A first)' : diff > 0 ? '(B first)' : '(same)'}`);
+            this.logDebug(`[DEBUG] Sort comparison: ${a.id} (${timeA}) vs ${b.id} (${timeB}) = ${diff} ${diff < 0 ? '(A first)' : diff > 0 ? '(B first)' : '(same)'}`);
             return diff;
         });
         
-        console.log(`[DEBUG] Final sorted message order (chronological - earliest first):`);
+    this.logDebug(`[DEBUG] Final sorted message order (chronological - earliest first):`);
         sortedMessages.forEach((msg, index) => {
-            console.log(`[DEBUG]   ${index + 1}. ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()}) - ${msg.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'}`);
+            this.logDebug(`[DEBUG]   ${index + 1}. ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()}) - ${msg.isFromCurrentUser ? 'CURRENT USER' : 'OTHER USER'}`);
         });
         
         // Validate sort order - ensure each message is chronologically before the next
@@ -1550,11 +1617,11 @@ export class EmailAnalysisService {
                 console.error(`[ERROR] Message ${i - 1} (${sortedMessages[i - 1].id}) time ${prevTime} > Message ${i} (${sortedMessages[i].id}) time ${currTime}`);
                 throw new Error(`Sort order violation: Message ${i - 1} (${prevTime}) should not be after Message ${i} (${currTime})`);
             } else {
-                console.log(`[DEBUG] ✅ Sort order correct: ${prevTime} <= ${currTime}`);
+                this.logDebug(`[DEBUG] ✅ Sort order correct: ${prevTime} <= ${currTime}`);
             }
         }
         
-        console.log(`[DEBUG] ✅ Sort validation passed. Total unique messages found: ${sortedMessages.length}`);
+    this.logDebug(`[DEBUG] ✅ Sort validation passed. Total unique messages found: ${sortedMessages.length}`);
         return sortedMessages;
     }
 
@@ -1655,7 +1722,7 @@ export class EmailAnalysisService {
                 }
             }
             
-            console.log(`[DEBUG] Parsed ${threadMessages.length} messages from search results`);
+            this.logDebug(`[DEBUG] Parsed ${threadMessages.length} messages from search results`);
             return threadMessages;
             
         } catch (error) {
@@ -1668,7 +1735,7 @@ export class EmailAnalysisService {
         const seen = new Set<string>();
         const uniqueMessages: ThreadMessage[] = [];
         
-        console.log(`[DEBUG] Starting deduplication with ${messages.length} messages`);
+    this.logDebug(`[DEBUG] Starting deduplication with ${messages.length} messages`);
         
         // Process messages in order received - don't pre-sort here
         for (const message of messages) {
@@ -1678,16 +1745,16 @@ export class EmailAnalysisService {
             if (!seen.has(key)) {
                 seen.add(key);
                 uniqueMessages.push(message);
-                console.log(`[DEBUG] ✅ Keeping unique message: ${message.id} at ${message.sentDate.toISOString()} (${message.sentDate.getTime()})`);
+                this.logDebug(`[DEBUG] ✅ Keeping unique message: ${message.id} at ${message.sentDate.toISOString()} (${message.sentDate.getTime()})`);
             } else {
-                console.log(`[DEBUG] ❌ Removing duplicate message: ${message.id} at ${message.sentDate.toISOString()} (${message.sentDate.getTime()})`);
+                this.logDebug(`[DEBUG] ❌ Removing duplicate message: ${message.id} at ${message.sentDate.toISOString()} (${message.sentDate.getTime()})`);
             }
         }
         
-        console.log(`[DEBUG] Deduplication complete: Removed ${messages.length - uniqueMessages.length} duplicate messages`);
-        console.log(`[DEBUG] Unique messages (in order processed):`);
+    this.logDebug(`[DEBUG] Deduplication complete: Removed ${messages.length - uniqueMessages.length} duplicate messages`);
+    this.logDebug(`[DEBUG] Unique messages (in order processed):`);
         uniqueMessages.forEach((msg, index) => {
-            console.log(`[DEBUG]   ${index + 1}. ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
+            this.logDebug(`[DEBUG]   ${index + 1}. ${msg.id} - ${msg.sentDate.toISOString()} (${msg.sentDate.getTime()})`);
         });
         
         return uniqueMessages;
@@ -1739,7 +1806,7 @@ export class EmailAnalysisService {
                 }
             }
             if (conversationId) {
-                console.log(`[DEBUG] Found conversation ID: ${conversationId}`);
+                this.logDebug(`[DEBUG] Found conversation ID: ${conversationId}`);
                 return conversationId;
             }
             console.log('[DEBUG] No conversation ID found in response (namespace-agnostic search)');
@@ -1838,11 +1905,11 @@ export class EmailAnalysisService {
                 isFromCurrentUser: isFromCurrentUser
             };
             
-            console.log(`[DEBUG] ✉️ PARSED MESSAGE: "${threadMessage.subject}"`);
-            console.log(`[DEBUG]   From: "${threadMessage.from}" (normalized: "${normalizedFromAddress}")`);
-            console.log(`[DEBUG]   Current user: "${currentUserEmail}" (normalized: "${normalizedCurrentUserEmail}")`);
-            console.log(`[DEBUG]   Is from current user: ${threadMessage.isFromCurrentUser ? 'YES' : 'NO'}`);
-            console.log(`[DEBUG]   Sent: ${threadMessage.sentDate.toISOString()}`);
+            this.logDebug(`[DEBUG] ✉️ PARSED MESSAGE: "${threadMessage.subject}"`);
+            this.logDebug(`[DEBUG]   From: "${threadMessage.from}" (normalized: "${normalizedFromAddress}")`);
+            this.logDebug(`[DEBUG]   Current user: "${currentUserEmail}" (normalized: "${normalizedCurrentUserEmail}")`);
+            this.logDebug(`[DEBUG]   Is from current user: ${threadMessage.isFromCurrentUser ? 'YES' : 'NO'}`);
+            this.logDebug(`[DEBUG]   Sent: ${threadMessage.sentDate.toISOString()}`);
             
             return threadMessage;
             
@@ -1862,9 +1929,9 @@ export class EmailAnalysisService {
         const baseSig = this.normalizeBodyForMatch(base.body || '');
         const MIN_BODY_CHARS = 20; // threshold to avoid noise-based matches
         const windowMs = this.CROSS_CONV_DEDUPE_WINDOW_MS;
-        console.log(`[DEBUG] Artificial chain builder: baseId=${base.id} normSubject="${normSubject}" baseLen=${baseSig?.length || 0}`);
+    this.logDebug(`[DEBUG] Artificial chain builder: baseId=${base.id} normSubject="${normSubject}" baseLen=${baseSig?.length || 0}`);
         if (!baseSig || baseSig.length < MIN_BODY_CHARS) {
-            console.log(`[DEBUG] 🧪 Artificial chain skipped: base body too short (len=${baseSig?.length || 0}) for subject "${normSubject}"`);
+            this.logDebug(`[DEBUG] 🧪 Artificial chain skipped: base body too short (len=${baseSig?.length || 0}) for subject "${normSubject}"`);
             this.trackAnalyticsEvent('artificial_chain_skipped', {
                 reason: 'base_too_short',
                 baseId: base.id,
@@ -1915,8 +1982,8 @@ export class EmailAnalysisService {
         }
 
         if (candidates.length === 0) {
-            console.log(`[DEBUG] 🧪 Artificial chain skipped: no candidates found for base ${base.id} subject "${normSubject}"`);
-            console.log(`[DEBUG] Candidate skip reasons: ${JSON.stringify(skipCounters)}`);
+            this.logDebug(`[DEBUG] 🧪 Artificial chain skipped: no candidates found for base ${base.id} subject "${normSubject}"`);
+            this.logDebug(`[DEBUG] Candidate skip reasons: ${JSON.stringify(skipCounters)}`);
             this.trackAnalyticsEvent('artificial_chain_skipped', {
                 reason: 'no_candidates',
                 baseId: base.id,
@@ -1930,8 +1997,8 @@ export class EmailAnalysisService {
         candidates.sort((a, b) => a.sentDate.getTime() - b.sentDate.getTime());
         const chain = this.buildStrictContainmentChain([base, ...candidates], MIN_BODY_CHARS);
 
-    console.log(`[DEBUG] 🧪 Artificial chain built for subject "${normSubject}"; candidateCount=${candidates.length}; chainLength=${chain.length}`);
-    console.log(`[DEBUG] Candidate skip reasons: ${JSON.stringify(skipCounters)}`);
+        this.logDebug(`[DEBUG] 🧪 Artificial chain built for subject "${normSubject}"; candidateCount=${candidates.length}; chainLength=${chain.length}`);
+        this.logDebug(`[DEBUG] Candidate skip reasons: ${JSON.stringify(skipCounters)}`);
     this.trackAnalyticsEvent('artificial_chain_built', {
             baseId: base.id,
             subject: normSubject,
