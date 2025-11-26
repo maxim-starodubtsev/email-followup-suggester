@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount source code for live editing
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      # Mount config files
+      - ./vitest.config.ts:/app/vitest.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      # Use named volume for node_modules to avoid permissions issues
+      - node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=test
+    command: npm test
+
+  test-watch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./vitest.config.ts:/app/vitest.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=test
+    command: npm run test:watch
+
+  test-coverage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./vitest.config.ts:/app/vitest.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - ./coverage:/app/coverage
+      - node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=test
+    command: npm run test:coverage
+
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src:/app/src:ro
+      - ./dist:/app/dist
+      - ./webpack.config.js:/app/webpack.config.js:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=production
+    command: npm run build
+
+volumes:
+  node_modules:
+

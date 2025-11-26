@@ -1,0 +1,30 @@
+{
+  "extends": [
+    "./node_modules/office-addin-lint/config/.eslintrc.json"
+  ],
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "node": true
+  },
+  "globals": {
+    "Office": "readonly",
+    "OfficeExtension": "readonly",
+    "HTMLCollectionOf": "readonly",
+    "describe": "readonly",
+    "it": "readonly",
+    "expect": "readonly",
+    "beforeEach": "readonly",
+    "afterEach": "readonly",
+    "beforeAll": "readonly",
+    "afterAll": "readonly",
+    "vi": "readonly",
+    "vitest": "readonly",
+    "fail": "readonly",
+    "jest": "readonly"
+  },
+  "rules": {
+    "no-constant-condition": ["error", { "checkLoops": false }]
+  }
+}
+

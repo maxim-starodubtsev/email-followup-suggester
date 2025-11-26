@@ -1,39 +1,15 @@
-// Mock Office.js for testing
-(global as any).Office = {
-  context: {
-    mailbox: {
-      userProfile: {
-        emailAddress: 'test@example.com',
-        displayName: 'Test User',
-        timeZone: 'UTC',
-        accountType: 'enterprise'
-      },
-      makeEwsRequestAsync: jest.fn()
-  ,displayNewMessageForm: jest.fn()
-    },
-    roamingSettings: {
-      get: jest.fn(),
-      set: jest.fn(),
-      saveAsync: jest.fn()
-    }
-  },
-  AsyncResultStatus: {
-    Succeeded: 'succeeded',
-    Failed: 'failed'
-  },
-  // Add HostType and onReady to satisfy taskpane.ts initialization in tests
-  HostType: {
-    Outlook: 'Outlook'
-  },
-  onReady: (callback: (info: any) => void) => {
-    // Invoke immediately for unit tests
-    callback({ host: 'Outlook' });
-  }
-};
+// Mock Office.js for testing using shared factory
+import { vi } from "vitest";
+import { OfficeMockFactory } from "./mocks/OfficeMockFactory";
+
+(global as any).Office = OfficeMockFactory.createJestMock({
+  userEmail: "test@example.com",
+  userName: "Test User",
+});
 
 // Setup fetch mock for API calls
-global.fetch = jest.fn();
+global.fetch = vi.fn() as any;
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 });

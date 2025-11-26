@@ -1,14 +1,14 @@
-import { XmlParsingService } from '../../src/services/XmlParsingService';
+import { XmlParsingService } from "../../src/services/XmlParsingService";
 
-describe('XmlParsingService', () => {
-    let xmlParsingService: XmlParsingService;
+describe("XmlParsingService", () => {
+  let xmlParsingService: XmlParsingService;
 
-    beforeEach(() => {
-        xmlParsingService = new XmlParsingService();
-    });
+  beforeEach(() => {
+    xmlParsingService = new XmlParsingService();
+  });
 
-    describe('EWS FindItem Response Parsing', () => {
-        const mockFindItemResponse = `<?xml version="1.0" encoding="utf-8"?>
+  describe("EWS FindItem Response Parsing", () => {
+    const mockFindItemResponse = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
     <s:Body>
         <m:FindItemResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
@@ -42,22 +42,25 @@ describe('XmlParsingService', () => {
     </s:Body>
 </s:Envelope>`;
 
-        it('should parse FindItem response and extract emails correctly', () => {
-            const emails = xmlParsingService.parseFindItemResponse(mockFindItemResponse);
-            
-            expect(emails).toHaveLength(1);
-            
-            const email = emails[0];
-            expect(email.subject).toBe('Test Subject');
-            expect(email.dateTimeSent).toBe('2024-01-15T10:30:00Z');
-            expect(email.from.emailAddress.address).toBe('sender@example.com');
-            expect(email.toRecipients).toHaveLength(1);
-            expect(email.toRecipients[0].emailAddress.address).toBe('recipient@example.com');
-            expect(email.body.content).toBe('Test email body');
-        });
+    it("should parse FindItem response and extract emails correctly", () => {
+      const emails =
+        xmlParsingService.parseFindItemResponse(mockFindItemResponse);
 
-        it('should handle empty FindItem response', () => {
-            const emptyResponse = `<?xml version="1.0" encoding="utf-8"?>
+      expect(emails).toHaveLength(1);
+
+      const email = emails[0];
+      expect(email.subject).toBe("Test Subject");
+      expect(email.dateTimeSent).toBe("2024-01-15T10:30:00Z");
+      expect(email.from.emailAddress.address).toBe("sender@example.com");
+      expect(email.toRecipients).toHaveLength(1);
+      expect(email.toRecipients[0].emailAddress.address).toBe(
+        "recipient@example.com",
+      );
+      expect(email.body.content).toBe("Test email body");
+    });
+
+    it("should handle empty FindItem response", () => {
+      const emptyResponse = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
     <s:Body>
         <m:FindItemResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
@@ -73,14 +76,14 @@ describe('XmlParsingService', () => {
     </s:Body>
 </s:Envelope>`;
 
-            const emails = xmlParsingService.parseFindItemResponse(emptyResponse);
-            expect(emails).toHaveLength(0);
-        });
+      const emails = xmlParsingService.parseFindItemResponse(emptyResponse);
+      expect(emails).toHaveLength(0);
     });
+  });
 
-    describe('EWS Response Validation', () => {
-        it('should validate valid EWS response', () => {
-            const validResponse = `<?xml version="1.0" encoding="utf-8"?>
+  describe("EWS Response Validation", () => {
+    it("should validate valid EWS response", () => {
+      const validResponse = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
     <s:Body>
         <m:FindItemResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
@@ -93,27 +96,27 @@ describe('XmlParsingService', () => {
     </s:Body>
 </s:Envelope>`;
 
-            const validation = xmlParsingService.validateEwsResponse(validResponse);
-            expect(validation.isValid).toBe(true);
-            expect(validation.error).toBeUndefined();
-        });
+      const validation = xmlParsingService.validateEwsResponse(validResponse);
+      expect(validation.isValid).toBe(true);
+      expect(validation.error).toBeUndefined();
+    });
 
-        it('should detect XML parse errors', () => {
-            const invalidXml = `<?xml version="1.0" encoding="utf-8"?>
+    it("should detect XML parse errors", () => {
+      const invalidXml = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
     <s:Body>
         <unclosed-tag>
     </s:Body>
 </s:Envelope>`;
 
-            const validation = xmlParsingService.validateEwsResponse(invalidXml);
-            expect(validation.isValid).toBe(false);
-            expect(validation.error).toContain('XML Parse Error');
-        });
+      const validation = xmlParsingService.validateEwsResponse(invalidXml);
+      expect(validation.isValid).toBe(false);
+      expect(validation.error).toContain("XML Parse Error");
     });
+  });
 
-    describe('GetConversationItems Response Parsing', () => {
-        const conversationResponse = `<?xml version="1.0" encoding="utf-8"?>
+  describe("GetConversationItems Response Parsing", () => {
+    const conversationResponse = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
     <s:Body>
         <m:GetConversationItemsResponse xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
@@ -147,18 +150,21 @@ describe('XmlParsingService', () => {
     </s:Body>
 </s:Envelope>`;
 
-        it('should parse conversation response correctly', () => {
-            const currentUserEmail = 'user@company.com';
-            const threadMessages = xmlParsingService.parseConversationResponse(conversationResponse, currentUserEmail);
-            
-            expect(threadMessages).toHaveLength(1);
-            
-            const message = threadMessages[0];
-            expect(message.subject).toBe('Original Message');
-            expect(message.from).toBe('user@company.com');
-            expect(message.isFromCurrentUser).toBe(true);
-            expect(message.body).toBe('First message');
-            expect(message.to).toContain('recipient@example.com');
-        });
+    it("should parse conversation response correctly", () => {
+      const currentUserEmail = "user@company.com";
+      const threadMessages = xmlParsingService.parseConversationResponse(
+        conversationResponse,
+        currentUserEmail,
+      );
+
+      expect(threadMessages).toHaveLength(1);
+
+      const message = threadMessages[0];
+      expect(message.subject).toBe("Original Message");
+      expect(message.from).toBe("user@company.com");
+      expect(message.isFromCurrentUser).toBe(true);
+      expect(message.body).toBe("First message");
+      expect(message.to).toContain("recipient@example.com");
     });
+  });
 });

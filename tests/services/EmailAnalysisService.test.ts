@@ -1,449 +1,504 @@
-import { EmailAnalysisService } from '../../src/services/EmailAnalysisService';
-import { LlmService } from '../../src/services/LlmService';
-import { ThreadMessage } from '../../src/models/FollowupEmail';
+import { EmailAnalysisService } from "../../src/services/EmailAnalysisService";
+import { LlmService } from "../../src/services/LlmService";
+import { ThreadMessage } from "../../src/models/FollowupEmail";
 
-describe('EmailAnalysisService', () => {
+describe("EmailAnalysisService", () => {
   let service: EmailAnalysisService;
-  let mockLlmService: jest.Mocked<LlmService>;
+  let mockLlmService: vi.Mocked<LlmService>;
 
   beforeEach(() => {
     service = new EmailAnalysisService();
     mockLlmService = {
-      analyzeThread: jest.fn(),
-      analyzeSentiment: jest.fn().mockResolvedValue({ sentiment: 'neutral' }),
-      getAvailableModels: jest.fn(),
-      checkModelLimits: jest.fn()
+      analyzeThread: vi.fn(),
+      analyzeSentiment: vi.fn().mockResolvedValue({ sentiment: "neutral" }),
+      getAvailableModels: vi.fn(),
+      checkModelLimits: vi.fn(),
     } as any;
     service.setLlmService(mockLlmService);
   });
 
-  describe('Priority Calculation', () => {
-    it('should calculate high priority for emails older than 7 days', () => {
-      const priority = (service as any).calculateEnhancedPriority(8, false, 'neutral');
-      expect(priority).toBe('high');
+  describe("Priority Calculation", () => {
+    it("should calculate high priority for emails older than 7 days", () => {
+      const priority = (service as any).calculateEnhancedPriority(
+        8,
+        false,
+        "neutral",
+      );
+      expect(priority).toBe("high");
     });
 
-    it('should calculate medium priority for emails 3-6 days old', () => {
-      const priority = (service as any).calculateEnhancedPriority(5, false, 'neutral');
-      expect(priority).toBe('medium');
+    it("should calculate medium priority for emails 3-6 days old", () => {
+      const priority = (service as any).calculateEnhancedPriority(
+        5,
+        false,
+        "neutral",
+      );
+      expect(priority).toBe("medium");
     });
 
-    it('should calculate low priority for emails less than 3 days old', () => {
-      const priority = (service as any).calculateEnhancedPriority(2, false, 'neutral');
-      expect(priority).toBe('low');
+    it("should calculate low priority for emails less than 3 days old", () => {
+      const priority = (service as any).calculateEnhancedPriority(
+        2,
+        false,
+        "neutral",
+      );
+      expect(priority).toBe("low");
     });
 
-    it('should boost priority for threaded conversations', () => {
-      const lowPriority = (service as any).calculateEnhancedPriority(2, true, 'neutral');
-      expect(lowPriority).toBe('medium');
+    it("should boost priority for threaded conversations", () => {
+      const lowPriority = (service as any).calculateEnhancedPriority(
+        2,
+        true,
+        "neutral",
+      );
+      expect(lowPriority).toBe("medium");
 
-      const mediumPriority = (service as any).calculateEnhancedPriority(5, true, 'neutral');
-      expect(mediumPriority).toBe('high');
+      const mediumPriority = (service as any).calculateEnhancedPriority(
+        5,
+        true,
+        "neutral",
+      );
+      expect(mediumPriority).toBe("high");
     });
 
-    it('should boost priority for urgent sentiment', () => {
-      const urgentPriority = (service as any).calculateEnhancedPriority(2, false, 'urgent');
-      expect(urgentPriority).toBe('high');
+    it("should boost priority for urgent sentiment", () => {
+      const urgentPriority = (service as any).calculateEnhancedPriority(
+        2,
+        false,
+        "urgent",
+      );
+      expect(urgentPriority).toBe("high");
     });
 
-    it('should boost priority for negative sentiment', () => {
-      const negativePriority = (service as any).calculateEnhancedPriority(1, false, 'negative');
-      expect(negativePriority).toBe('medium');
+    it("should boost priority for negative sentiment", () => {
+      const negativePriority = (service as any).calculateEnhancedPriority(
+        1,
+        false,
+        "negative",
+      );
+      expect(negativePriority).toBe("medium");
     });
   });
 
-  describe('Summary Generation', () => {
-    it('should generate summary from email body', () => {
-      const body = 'This is a test email about project updates and timeline discussions.';
-      const subject = 'Project Update';
-      
+  describe("Summary Generation", () => {
+    it("should generate summary from email body", () => {
+      const body =
+        "This is a test email about project updates and timeline discussions.";
+      const subject = "Project Update";
+
       const summary = (service as any).generateSummary(body, subject);
       expect(summary).toBe(body);
     });
 
-    it('should truncate long email bodies', () => {
-      const longBody = 'A'.repeat(200);
-      const subject = 'Long Email';
-      
+    it("should truncate long email bodies", () => {
+      const longBody = "A".repeat(200);
+      const subject = "Long Email";
+
       const summary = (service as any).generateSummary(longBody, subject);
       expect(summary.length).toBeLessThanOrEqual(153); // 150 + '...'
-      expect(summary.endsWith('...')).toBe(true);
+      expect(summary.endsWith("...")).toBe(true);
     });
 
-    it('should use subject when body is empty', () => {
-      const summary = (service as any).generateSummary('', 'Test Subject');
-      expect(summary).toBe('Email about: Test Subject');
+    it("should use subject when body is empty", () => {
+      const summary = (service as any).generateSummary("", "Test Subject");
+      expect(summary).toBe("Email about: Test Subject");
     });
 
-    it('should remove HTML tags from body', () => {
-      const htmlBody = '<p>This is a <strong>test</strong> email.</p>';
-      const subject = 'HTML Email';
-      
+    it("should remove HTML tags from body", () => {
+      const htmlBody = "<p>This is a <strong>test</strong> email.</p>";
+      const subject = "HTML Email";
+
       const summary = (service as any).generateSummary(htmlBody, subject);
-      expect(summary).toBe('This is a test email.');
+      expect(summary).toBe("This is a test email.");
     });
   });
 
-  describe('Cache Operations', () => {
-    it('should get cache statistics', () => {
+  describe("Cache Operations", () => {
+    it("should get cache statistics", () => {
       const stats = service.getCacheStats();
-      
-      expect(stats).toHaveProperty('totalEntries');
-      expect(stats).toHaveProperty('hitRate');
-      expect(stats).toHaveProperty('totalMemoryUsage');
+
+      expect(stats).toHaveProperty("totalEntries");
+      expect(stats).toHaveProperty("hitRate");
+      expect(stats).toHaveProperty("totalMemoryUsage");
     });
 
-    it('should clear cache with pattern', () => {
-      const clearedCount = service.clearCache('email:.*');
-      expect(typeof clearedCount).toBe('number');
+    it("should clear cache with pattern", () => {
+      const clearedCount = service.clearCache("email:.*");
+      expect(typeof clearedCount).toBe("number");
     });
 
-    it('should get memory pressure', () => {
+    it("should get memory pressure", () => {
       const pressure = service.getCacheMemoryPressure();
-      expect(typeof pressure).toBe('number');
+      expect(typeof pressure).toBe("number");
       expect(pressure).toBeGreaterThanOrEqual(0);
     });
   });
 
-  describe('Bulk Operations', () => {
-    it('should bulk snooze emails', async () => {
-      const emailIds = ['email1', 'email2', 'email3'];
+  describe("Bulk Operations", () => {
+    it("should bulk snooze emails", async () => {
+      const emailIds = ["email1", "email2", "email3"];
       const minutes = 30;
 
       await service.bulkSnoozeEmails(emailIds, minutes);
 
-      emailIds.forEach(emailId => {
+      emailIds.forEach((emailId) => {
         expect((service as any).isEmailSnoozed(emailId)).toBe(true);
       });
     });
 
-    it('should bulk dismiss emails', async () => {
-      const emailIds = ['email1', 'email2', 'email3'];
+    it("should bulk dismiss emails", async () => {
+      const emailIds = ["email1", "email2", "email3"];
 
       await service.bulkDismissEmails(emailIds);
 
-      emailIds.forEach(emailId => {
+      emailIds.forEach((emailId) => {
         expect((service as any).isEmailDismissed(emailId)).toBe(true);
       });
     });
   });
 
-  describe('Sentiment Analysis', () => {
-    it('should analyze email sentiment', async () => {
-      const emailBody = 'This is urgent! Please respond ASAP.';
-      
+  describe("Sentiment Analysis", () => {
+    it("should analyze email sentiment", async () => {
+      const emailBody = "This is urgent! Please respond ASAP.";
+
       const sentiment = await service.analyzeEmailSentiment(emailBody);
-      
-      expect(['positive', 'neutral', 'negative', 'urgent']).toContain(sentiment);
+
+      expect(["positive", "neutral", "negative", "urgent"]).toContain(
+        sentiment,
+      );
     });
 
-    it('should detect urgent keywords', () => {
-      const urgentBody = 'This is an urgent matter that needs immediate attention.';
+    it("should detect urgent keywords", () => {
+      const urgentBody =
+        "This is an urgent matter that needs immediate attention.";
       const sentiment = (service as any).analyzeSentimentBasic(urgentBody);
-      
-      expect(sentiment).toBe('urgent');
+
+      expect(sentiment).toBe("urgent");
     });
 
-    it('should detect negative sentiment', () => {
-      const negativeBody = 'There is a problem with the system that failed to work.';
+    it("should detect negative sentiment", () => {
+      const negativeBody =
+        "There is a problem with the system that failed to work.";
       const sentiment = (service as any).analyzeSentimentBasic(negativeBody);
-      
-      expect(sentiment).toBe('negative');
+
+      expect(sentiment).toBe("negative");
     });
 
-    it('should detect positive sentiment', () => {
-      const positiveBody = 'Thanks for the excellent work! This is perfect.';
+    it("should detect positive sentiment", () => {
+      const positiveBody = "Thanks for the excellent work! This is perfect.";
       const sentiment = (service as any).analyzeSentimentBasic(positiveBody);
-      
-      expect(sentiment).toBe('positive');
+
+      expect(sentiment).toBe("positive");
     });
 
-    it('should default to neutral sentiment', () => {
-      const neutralBody = 'Here is the report you requested.';
+    it("should default to neutral sentiment", () => {
+      const neutralBody = "Here is the report you requested.";
       const sentiment = (service as any).analyzeSentimentBasic(neutralBody);
-      
-      expect(sentiment).toBe('neutral');
+
+      expect(sentiment).toBe("neutral");
     });
   });
 
-  describe('LLM Integration', () => {
-    it('should use LLM summary when available', async () => {
-      mockLlmService.analyzeThread.mockResolvedValue('AI-generated summary');
-      mockLlmService.generateFollowupSuggestions = jest.fn().mockResolvedValue(['AI suggestion']);
+  describe("LLM Integration", () => {
+    it("should use LLM summary when available", async () => {
+      mockLlmService.analyzeThread.mockResolvedValue("AI-generated summary");
+      mockLlmService.generateFollowupSuggestions = vi
+        .fn()
+        .mockResolvedValue(["AI suggestion"]);
 
       const mockLastMessage: ThreadMessage = {
-        id: 'msg1',
-        subject: 'Test Subject',
-        from: 'test@example.com',
-        to: ['recipient@example.com'],
-        sentDate: new Date('2025-01-25T10:00:00Z'),
-        body: 'Test body',
-        isFromCurrentUser: true
+        id: "msg1",
+        subject: "Test Subject",
+        from: "test@example.com",
+        to: ["recipient@example.com"],
+        sentDate: new Date("2025-01-25T10:00:00Z"),
+        body: "Test body",
+        isFromCurrentUser: true,
       };
 
       const followupEmail = await (service as any).createFollowupEmailEnhanced(
-        'conv-ai-1',
+        "conv-ai-1",
         mockLastMessage,
         [mockLastMessage],
-        'test@example.com'
+        "test@example.com",
       );
 
-      expect(followupEmail.summary).toBe('AI-generated summary');
-      expect(followupEmail.llmSuggestion).toBe('AI suggestion');
-      expect(followupEmail.llmSummary).toBe('AI-generated summary');
+      expect(followupEmail.summary).toBe("AI-generated summary");
+      expect(followupEmail.llmSuggestion).toBe("AI suggestion");
+      expect(followupEmail.llmSummary).toBe("AI-generated summary");
     });
 
-    it('should fallback to basic summary when LLM fails', async () => {
-      mockLlmService.analyzeThread.mockRejectedValue(new Error('API Error'));
+    it("should fallback to basic summary when LLM fails", async () => {
+      mockLlmService.analyzeThread.mockRejectedValue(new Error("API Error"));
 
       const mockLastMessage: ThreadMessage = {
-        id: 'msg1',
-        subject: 'Test Subject',
-        from: 'test@example.com',
-        to: ['recipient@example.com'],
-        sentDate: new Date('2025-01-25T10:00:00Z'),
-        body: 'This is a test email body for fallback testing.',
-        isFromCurrentUser: true
+        id: "msg1",
+        subject: "Test Subject",
+        from: "test@example.com",
+        to: ["recipient@example.com"],
+        sentDate: new Date("2025-01-25T10:00:00Z"),
+        body: "This is a test email body for fallback testing.",
+        isFromCurrentUser: true,
       };
 
       const followupEmail = await (service as any).createFollowupEmailEnhanced(
-        'conv-ai-2',
+        "conv-ai-2",
         mockLastMessage,
         [mockLastMessage],
-        'test@example.com'
+        "test@example.com",
       );
 
-      expect(followupEmail.summary).toBe('This is a test email body for fallback testing.');
+      expect(followupEmail.summary).toBe(
+        "This is a test email body for fallback testing.",
+      );
       expect(followupEmail.llmSuggestion).toBeUndefined();
       expect(followupEmail.llmSummary).toBeUndefined();
     });
   });
 
-  describe('Thread Analysis and Response Detection (Bug Fixes)', () => {
-    describe('GetConversationItems SOAP request', () => {
-      it('should include proper namespace declarations on the Envelope tag', () => {
-        const req = (service as any).buildGetConversationItemsRequest('ABC123');
-        expect(req).toContain('<soap:Envelope');
+  describe("Thread Analysis and Response Detection (Bug Fixes)", () => {
+    describe("GetConversationItems SOAP request", () => {
+      it("should include proper namespace declarations on the Envelope tag", () => {
+        const req = (service as any).buildGetConversationItemsRequest("ABC123");
+        expect(req).toContain("<soap:Envelope");
         // Namespaces must be on the same opening tag
-        expect(req).toContain('xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"');
-        expect(req).toContain('xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"');
-        expect(req).toContain('xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"');
+        expect(req).toContain(
+          'xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"',
+        );
+        expect(req).toContain(
+          'xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"',
+        );
+        expect(req).toContain(
+          'xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"',
+        );
       });
     });
-    describe('getLastMessageInThread', () => {
-      it('should return the chronologically latest message', () => {
+    describe("getLastMessageInThread", () => {
+      it("should return the chronologically latest message", () => {
         const messages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Original message',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Original message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Original Email',
-            from: 'recipient@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Response message',
-            isFromCurrentUser: false
+            id: "msg2",
+            subject: "Re: Original Email",
+            from: "recipient@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "Response message",
+            isFromCurrentUser: false,
           },
           {
-            id: 'msg3',
-            subject: 'Re: Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-21T12:00:00Z'),
-            body: 'Follow-up message',
-            isFromCurrentUser: true
-          }
+            id: "msg3",
+            subject: "Re: Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-21T12:00:00Z"),
+            body: "Follow-up message",
+            isFromCurrentUser: true,
+          },
         ];
 
         const lastMessage = (service as any).getLastMessageInThread(messages);
-        
+
         expect(lastMessage).not.toBeNull();
-        expect(lastMessage.id).toBe('msg2'); // Latest by date
-        expect(lastMessage.sentDate).toEqual(new Date('2025-01-22T15:00:00Z'));
+        expect(lastMessage.id).toBe("msg2"); // Latest by date
+        expect(lastMessage.sentDate).toEqual(new Date("2025-01-22T15:00:00Z"));
         expect(lastMessage.isFromCurrentUser).toBe(false);
       });
 
-      it('should return null for empty thread', () => {
+      it("should return null for empty thread", () => {
         const lastMessage = (service as any).getLastMessageInThread([]);
         expect(lastMessage).toBeNull();
       });
 
-      it('should handle single message thread', () => {
+      it("should handle single message thread", () => {
         const messages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Single Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Single message',
-            isFromCurrentUser: true
-          }
+            id: "msg1",
+            subject: "Single Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Single message",
+            isFromCurrentUser: true,
+          },
         ];
 
         const lastMessage = (service as any).getLastMessageInThread(messages);
-        
+
         expect(lastMessage).not.toBeNull();
-        expect(lastMessage.id).toBe('msg1');
+        expect(lastMessage.id).toBe("msg1");
       });
     });
 
-    describe('checkForResponseInThread', () => {
-      it('should detect response after last sent message (Bug Fix Case 1)', () => {
+    describe("checkForResponseInThread", () => {
+      it("should detect response after last sent message (Bug Fix Case 1)", () => {
         const messages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Original message',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Original message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Original Email',
-            from: 'recipient@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Response message',
-            isFromCurrentUser: false
-          }
+            id: "msg2",
+            subject: "Re: Original Email",
+            from: "recipient@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "Response message",
+            isFromCurrentUser: false,
+          },
         ];
 
-        const lastSentDate = new Date('2025-01-20T10:00:00Z');
-        const hasResponse = (service as any).checkForResponseInThread(messages, lastSentDate);
-        
+        const lastSentDate = new Date("2025-01-20T10:00:00Z");
+        const hasResponse = (service as any).checkForResponseInThread(
+          messages,
+          lastSentDate,
+        );
+
         expect(hasResponse).toBe(true);
       });
 
-      it('should NOT detect response when last message is from current user (Bug Fix Case 2)', () => {
+      it("should NOT detect response when last message is from current user (Bug Fix Case 2)", () => {
         const messages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Original Email',
-            from: 'recipient@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Original message',
-            isFromCurrentUser: false
+            id: "msg1",
+            subject: "Original Email",
+            from: "recipient@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Original message",
+            isFromCurrentUser: false,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'My response message',
-            isFromCurrentUser: true
-          }
+            id: "msg2",
+            subject: "Re: Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "My response message",
+            isFromCurrentUser: true,
+          },
         ];
 
-        const lastSentDate = new Date('2025-01-22T15:00:00Z');
-        const hasResponse = (service as any).checkForResponseInThread(messages, lastSentDate);
-        
+        const lastSentDate = new Date("2025-01-22T15:00:00Z");
+        const hasResponse = (service as any).checkForResponseInThread(
+          messages,
+          lastSentDate,
+        );
+
         expect(hasResponse).toBe(false);
       });
 
-      it('should handle complex thread with multiple back-and-forth messages', () => {
+      it("should handle complex thread with multiple back-and-forth messages", () => {
         const messages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Original message',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Original message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Original Email',
-            from: 'recipient@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-21T09:00:00Z'),
-            body: 'First response',
-            isFromCurrentUser: false
+            id: "msg2",
+            subject: "Re: Original Email",
+            from: "recipient@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-21T09:00:00Z"),
+            body: "First response",
+            isFromCurrentUser: false,
           },
           {
-            id: 'msg3',
-            subject: 'Re: Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-22T14:00:00Z'),
-            body: 'My follow-up',
-            isFromCurrentUser: true
+            id: "msg3",
+            subject: "Re: Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-22T14:00:00Z"),
+            body: "My follow-up",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg4',
-            subject: 'Re: Original Email',
-            from: 'recipient@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-23T11:00:00Z'),
-            body: 'Final response',
-            isFromCurrentUser: false
-          }
+            id: "msg4",
+            subject: "Re: Original Email",
+            from: "recipient@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-23T11:00:00Z"),
+            body: "Final response",
+            isFromCurrentUser: false,
+          },
         ];
 
         // Check if there's a response after the user's last message (msg3)
-        const lastUserSentDate = new Date('2025-01-22T14:00:00Z');
-        const hasResponse = (service as any).checkForResponseInThread(messages, lastUserSentDate);
-        
+        const lastUserSentDate = new Date("2025-01-22T14:00:00Z");
+        const hasResponse = (service as any).checkForResponseInThread(
+          messages,
+          lastUserSentDate,
+        );
+
         expect(hasResponse).toBe(true); // msg4 is a response after msg3
       });
 
-      it('should not detect responses from current user as external responses', () => {
+      it("should not detect responses from current user as external responses", () => {
         const messages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Original message',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Original message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Original Email',
-            from: 'user@example.com',
-            to: ['recipient@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Another message from me',
-            isFromCurrentUser: true
-          }
+            id: "msg2",
+            subject: "Re: Original Email",
+            from: "user@example.com",
+            to: ["recipient@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "Another message from me",
+            isFromCurrentUser: true,
+          },
         ];
 
-        const lastSentDate = new Date('2025-01-20T10:00:00Z');
-        const hasResponse = (service as any).checkForResponseInThread(messages, lastSentDate);
-        
+        const lastSentDate = new Date("2025-01-20T10:00:00Z");
+        const hasResponse = (service as any).checkForResponseInThread(
+          messages,
+          lastSentDate,
+        );
+
         expect(hasResponse).toBe(false); // Only messages from current user after the last sent date
       });
     });
 
-    describe('parseMessageElement - Case-insensitive email comparison', () => {
+    describe("parseMessageElement - Case-insensitive email comparison", () => {
       beforeEach(() => {
         // Mock Office context for these tests
         (global as any).Office = {
           context: {
             mailbox: {
               userProfile: {
-                emailAddress: 'User@Example.com' // Mixed case to test normalization
-              }
-            }
-          }
+                emailAddress: "User@Example.com", // Mixed case to test normalization
+              },
+            },
+          },
         };
       });
 
-      it('should correctly identify current user messages with case variations', () => {
-        const mockElement = document.createElement('div');
+      it("should correctly identify current user messages with case variations", () => {
+        const mockElement = document.createElement("div");
         mockElement.innerHTML = `
           <t:ItemId Id="test-id" />
           <t:Subject>Test Subject</t:Subject>
@@ -461,16 +516,19 @@ describe('EmailAnalysisService', () => {
           <t:Body>Test body</t:Body>
         `;
 
-        const currentUserEmail = 'User@Example.com';
-        const message = (service as any).parseMessageElement(mockElement, currentUserEmail);
-        
+        const currentUserEmail = "User@Example.com";
+        const message = (service as any).parseMessageElement(
+          mockElement,
+          currentUserEmail,
+        );
+
         expect(message).not.toBeNull();
         expect(message.isFromCurrentUser).toBe(true); // Should be true despite case difference
-        expect(message.from).toBe('user@example.com');
+        expect(message.from).toBe("user@example.com");
       });
 
-      it('should correctly identify external messages', () => {
-        const mockElement = document.createElement('div');
+      it("should correctly identify external messages", () => {
+        const mockElement = document.createElement("div");
         mockElement.innerHTML = `
           <t:ItemId Id="test-id" />
           <t:Subject>Test Subject</t:Subject>
@@ -488,494 +546,737 @@ describe('EmailAnalysisService', () => {
           <t:Body>Test body</t:Body>
         `;
 
-        const currentUserEmail = 'user@example.com';
-        const message = (service as any).parseMessageElement(mockElement, currentUserEmail);
-        
+        const currentUserEmail = "user@example.com";
+        const message = (service as any).parseMessageElement(
+          mockElement,
+          currentUserEmail,
+        );
+
         expect(message).not.toBeNull();
         expect(message.isFromCurrentUser).toBe(false);
-        expect(message.from).toBe('OTHER@EXAMPLE.COM');
+        expect(message.from).toBe("OTHER@EXAMPLE.COM");
       });
     });
 
-    describe('Conversation Processing Integration Tests', () => {
+    describe("Conversation Processing Integration Tests", () => {
       beforeEach(() => {
         // Mock Office context
         (global as any).Office = {
           context: {
             mailbox: {
               userProfile: {
-                emailAddress: 'user@example.com'
-              }
-            }
-          }
+                emailAddress: "user@example.com",
+              },
+            },
+          },
         };
       });
 
-      it('should filter out conversations where last message has a response (Bug Case 1)', async () => {
+      it("should filter out conversations where last message has a response (Bug Case 1)", async () => {
         // Mock the thread retrieval to return a conversation with a response
         const mockThreadMessages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Project Update',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Please review the project update',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Project Update",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Please review the project update",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Project Update',
-            from: 'client@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Thanks for the update. Looks good!',
-            isFromCurrentUser: false
-          }
+            id: "msg2",
+            subject: "Re: Project Update",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "Thanks for the update. Looks good!",
+            isFromCurrentUser: false,
+          },
         ];
 
         // Spy on the cached method to return our mock data
-        jest.spyOn(service as any, 'getConversationThreadCached')
-          .mockResolvedValue(mockThreadMessages);
+        vi.spyOn(
+          service as any,
+          "getConversationThreadCached",
+        ).mockResolvedValue(mockThreadMessages);
 
         const result = await (service as any).processConversationWithCaching(
-          'conv1',
-          [{ id: 'msg1' }],
-          'user@example.com',
-          []
+          "conv1",
+          [{ id: "msg1" }],
+          "user@example.com",
+          [],
         );
 
         expect(result).toBeNull(); // Should be filtered out because there's a response
       });
 
-      it('should include conversations where current user sent last message without response (Bug Case 2)', async () => {
+      it("should include conversations where current user sent last message without response (Bug Case 2)", async () => {
         // Mock the thread retrieval to return a conversation where user sent the last message
         const mockThreadMessages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Project Question',
-            from: 'client@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'I have a question about the project',
-            isFromCurrentUser: false
+            id: "msg1",
+            subject: "Project Question",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "I have a question about the project",
+            isFromCurrentUser: false,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Project Question',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Here is my response to your question',
-            isFromCurrentUser: true
-          }
+            id: "msg2",
+            subject: "Re: Project Question",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "Here is my response to your question",
+            isFromCurrentUser: true,
+          },
         ];
 
         // Spy on the cached method to return our mock data
-        jest.spyOn(service as any, 'getConversationThreadCached')
-          .mockResolvedValue(mockThreadMessages);
+        vi.spyOn(
+          service as any,
+          "getConversationThreadCached",
+        ).mockResolvedValue(mockThreadMessages);
 
-        jest.spyOn(service as any, 'createFollowupEmailEnhanced')
-          .mockResolvedValue({
-            id: 'msg2',
-            subject: 'Re: Project Question',
-            recipients: ['client@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Here is my response to your question',
-            summary: 'Response to project question',
-            priority: 'medium' as const,
-            daysWithoutResponse: 3,
-            conversationId: 'conv1',
-            hasAttachments: false,
-            accountEmail: 'user@example.com',
-            threadMessages: mockThreadMessages,
-            isSnoozed: false,
-            isDismissed: false
-          });
+        vi.spyOn(
+          service as any,
+          "createFollowupEmailEnhanced",
+        ).mockResolvedValue({
+          id: "msg2",
+          subject: "Re: Project Question",
+          recipients: ["client@example.com"],
+          sentDate: new Date("2025-01-22T15:00:00Z"),
+          body: "Here is my response to your question",
+          summary: "Response to project question",
+          priority: "medium" as const,
+          daysWithoutResponse: 3,
+          conversationId: "conv1",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: mockThreadMessages,
+          isSnoozed: false,
+          isDismissed: false,
+        });
 
         const result = await (service as any).processConversationWithCaching(
-          'conv1',
-          [{ id: 'msg1' }],
-          'user@example.com',
-          []
+          "conv1",
+          [{ id: "msg1" }],
+          "user@example.com",
+          [],
         );
 
         expect(result).not.toBeNull(); // Should be included for followup
-        expect(result.id).toBe('msg2');
+        expect(result.id).toBe("msg2");
       });
 
-      it('should handle conversations with mixed case email addresses', async () => {
+      it("should handle conversations with mixed case email addresses", async () => {
         const mockThreadMessages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Test Email',
-            from: 'USER@EXAMPLE.COM', // Different case
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Test message',
-            isFromCurrentUser: true // Should be correctly identified
-          }
+            id: "msg1",
+            subject: "Test Email",
+            from: "USER@EXAMPLE.COM", // Different case
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Test message",
+            isFromCurrentUser: true, // Should be correctly identified
+          },
         ];
 
-        jest.spyOn(service as any, 'getConversationThreadCached')
-          .mockResolvedValue(mockThreadMessages);
+        vi.spyOn(
+          service as any,
+          "getConversationThreadCached",
+        ).mockResolvedValue(mockThreadMessages);
 
-        jest.spyOn(service as any, 'createFollowupEmailEnhanced')
-          .mockResolvedValue({
-            id: 'msg1',
-            subject: 'Test Email',
-            recipients: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Test message',
-            summary: 'Test message',
-            priority: 'low' as const,
-            daysWithoutResponse: 16,
-            conversationId: 'conv1',
-            hasAttachments: false,
-            accountEmail: 'USER@EXAMPLE.COM',
-            threadMessages: mockThreadMessages,
-            isSnoozed: false,
-            isDismissed: false
-          });
+        vi.spyOn(
+          service as any,
+          "createFollowupEmailEnhanced",
+        ).mockResolvedValue({
+          id: "msg1",
+          subject: "Test Email",
+          recipients: ["client@example.com"],
+          sentDate: new Date("2025-01-20T10:00:00Z"),
+          body: "Test message",
+          summary: "Test message",
+          priority: "low" as const,
+          daysWithoutResponse: 16,
+          conversationId: "conv1",
+          hasAttachments: false,
+          accountEmail: "USER@EXAMPLE.COM",
+          threadMessages: mockThreadMessages,
+          isSnoozed: false,
+          isDismissed: false,
+        });
 
         const result = await (service as any).processConversationWithCaching(
-          'conv1',
-          [{ id: 'msg1' }],
-          'user@example.com', // Different case
-          []
+          "conv1",
+          [{ id: "msg1" }],
+          "user@example.com", // Different case
+          [],
         );
 
         expect(result).not.toBeNull();
-        expect(result.accountEmail).toBe('USER@EXAMPLE.COM');
+        expect(result.accountEmail).toBe("USER@EXAMPLE.COM");
       });
 
-      it('should only show threads where user is last sender across folders (multi-folder)', async () => {
+      it("should only show threads where user is last sender across folders (multi-folder)", async () => {
         // Simulate a thread where user sent last message (needs followup)
         const threadNeedingFollowup: ThreadMessage[] = [
-          { id: 'a1', subject: 'Need Info', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Question', isFromCurrentUser: false },
-          { id: 'a2', subject: 'Re: Need Info', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-21T10:00:00Z'), body: 'Answer provided', isFromCurrentUser: true }
+          {
+            id: "a1",
+            subject: "Need Info",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Question",
+            isFromCurrentUser: false,
+          },
+          {
+            id: "a2",
+            subject: "Re: Need Info",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-21T10:00:00Z"),
+            body: "Answer provided",
+            isFromCurrentUser: true,
+          },
         ];
         // Simulate a thread where client responded after user (should be excluded)
         const threadAlreadyAnswered: ThreadMessage[] = [
-          { id: 'b1', subject: 'Status', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Any update?', isFromCurrentUser: true },
-              { id: 'b2', subject: 'Re: Status', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-22T10:00:00Z'), body: 'We are good.', isFromCurrentUser: false }
+          {
+            id: "b1",
+            subject: "Status",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Any update?",
+            isFromCurrentUser: true,
+          },
+          {
+            id: "b2",
+            subject: "Re: Status",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-22T10:00:00Z"),
+            body: "We are good.",
+            isFromCurrentUser: false,
+          },
         ];
 
-        jest.spyOn(service as any, 'getConversationThreadCached')
-          .mockImplementation(async (...args: any[]) => {
-            const id = args[0] as string;
-            return id.startsWith('a') ? threadNeedingFollowup : threadAlreadyAnswered;
-          });
-        jest.spyOn(service as any, 'createFollowupEmailEnhanced')
-          .mockImplementation(async (...args: any[]) => {
-            const lastMessage = args[1] as ThreadMessage;
-            const thread = args[2] as ThreadMessage[];
-            return {
-              id: lastMessage.id,
-              subject: lastMessage.subject,
-              recipients: lastMessage.to,
-              sentDate: lastMessage.sentDate,
-              body: lastMessage.body,
-              summary: lastMessage.body,
-              priority: 'low' as const,
-              daysWithoutResponse: 1,
-              conversationId: 'conv-' + lastMessage.id,
-              hasAttachments: false,
-              accountEmail: lastMessage.from,
-              threadMessages: thread,
-              isSnoozed: false,
-              isDismissed: false
-            };
-          });
+        vi.spyOn(
+          service as any,
+          "getConversationThreadCached",
+        ).mockImplementation(async (...args: any[]) => {
+          const id = args[0] as string;
+          return id.startsWith("a")
+            ? threadNeedingFollowup
+            : threadAlreadyAnswered;
+        });
+        vi.spyOn(
+          service as any,
+          "createFollowupEmailEnhanced",
+        ).mockImplementation(async (...args: any[]) => {
+          const lastMessage = args[1] as ThreadMessage;
+          const thread = args[2] as ThreadMessage[];
+          return {
+            id: lastMessage.id,
+            subject: lastMessage.subject,
+            recipients: lastMessage.to,
+            sentDate: lastMessage.sentDate,
+            body: lastMessage.body,
+            summary: lastMessage.body,
+            priority: "low" as const,
+            daysWithoutResponse: 1,
+            conversationId: "conv-" + lastMessage.id,
+            hasAttachments: false,
+            accountEmail: lastMessage.from,
+            threadMessages: thread,
+            isSnoozed: false,
+            isDismissed: false,
+          };
+        });
 
         // Directly invoke two conversations
-        const res1 = await (service as any).processConversationWithCaching('conv-a', [{ id: 'a1' }], 'user@example.com', []);
-        const res2 = await (service as any).processConversationWithCaching('conv-b', [{ id: 'b1' }], 'user@example.com', []);
+        const res1 = await (service as any).processConversationWithCaching(
+          "conv-a",
+          [{ id: "a1" }],
+          "user@example.com",
+          [],
+        );
+        const res2 = await (service as any).processConversationWithCaching(
+          "conv-b",
+          [{ id: "b1" }],
+          "user@example.com",
+          [],
+        );
 
         expect(res1).not.toBeNull();
-        expect(res1.id).toBe('a2');
+        expect(res1.id).toBe("a2");
         expect(res2).toBeNull();
       });
 
-      it('should not include sent items that already got an answer from other user (requirement)', async () => {
+      it("should not include sent items that already got an answer from other user (requirement)", async () => {
         const answeredThread: ThreadMessage[] = [
-          { id: 'c1', subject: 'Ping', from: 'user@example.com', to: ['peer@example.com'], sentDate: new Date('2025-01-20T09:00:00Z'), body: 'Ping', isFromCurrentUser: true },
-          { id: 'c2', subject: 'Re: Ping', from: 'peer@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Pong', isFromCurrentUser: false }
+          {
+            id: "c1",
+            subject: "Ping",
+            from: "user@example.com",
+            to: ["peer@example.com"],
+            sentDate: new Date("2025-01-20T09:00:00Z"),
+            body: "Ping",
+            isFromCurrentUser: true,
+          },
+          {
+            id: "c2",
+            subject: "Re: Ping",
+            from: "peer@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Pong",
+            isFromCurrentUser: false,
+          },
         ];
-        jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue(answeredThread);
-        const result = await (service as any).processConversationWithCaching('conv-c', [{ id: 'c1' }], 'user@example.com', []);
+        vi.spyOn(
+          service as any,
+          "getConversationThreadCached",
+        ).mockResolvedValue(answeredThread);
+        const result = await (service as any).processConversationWithCaching(
+          "conv-c",
+          [{ id: "c1" }],
+          "user@example.com",
+          [],
+        );
         expect(result).toBeNull();
       });
     });
 
-    describe('Dedupe Followup Emails', () => {
-      it('should keep only the latest followup per conversation', () => {
+    describe("Dedupe Followup Emails", () => {
+      it("should keep only the latest followup per conversation", () => {
         const now = new Date();
         const earlier = new Date(now.getTime() - 60_000);
         const followups = [
-          { id: 'm1', subject: 'Subj', recipients: ['a@b.com'], sentDate: earlier, body: '1', summary: '1', priority: 'low' as const, daysWithoutResponse: 1, conversationId: 'convX', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false },
-          { id: 'm2', subject: 'Subj', recipients: ['a@b.com'], sentDate: now, body: '2', summary: '2', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'convX', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false }
+          {
+            id: "m1",
+            subject: "Subj",
+            recipients: ["a@b.com"],
+            sentDate: earlier,
+            body: "1",
+            summary: "1",
+            priority: "low" as const,
+            daysWithoutResponse: 1,
+            conversationId: "convX",
+            hasAttachments: false,
+            accountEmail: "user@example.com",
+            threadMessages: [],
+            isSnoozed: false,
+            isDismissed: false,
+          },
+          {
+            id: "m2",
+            subject: "Subj",
+            recipients: ["a@b.com"],
+            sentDate: now,
+            body: "2",
+            summary: "2",
+            priority: "low" as const,
+            daysWithoutResponse: 0,
+            conversationId: "convX",
+            hasAttachments: false,
+            accountEmail: "user@example.com",
+            threadMessages: [],
+            isSnoozed: false,
+            isDismissed: false,
+          },
         ];
         const deduped = (service as any).dedupeFollowupEmails(followups);
         expect(deduped).toHaveLength(1);
-        expect(deduped[0].id).toBe('m2');
+        expect(deduped[0].id).toBe("m2");
       });
 
-      it('should fallback to composite key when conversationId missing', () => {
+      it("should fallback to composite key when conversationId missing", () => {
         const now = new Date();
         const fups = [
-          { id: 'x1', subject: 'Topic', recipients: ['r@e.com'], sentDate: now, body: 'A', summary: 'A', priority: 'low' as const, daysWithoutResponse: 0, conversationId: '', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false },
-          { id: 'x2', subject: 'Topic', recipients: ['r@e.com'], sentDate: new Date(now.getTime() - 5000), body: 'B', summary: 'B', priority: 'low' as const, daysWithoutResponse: 0, conversationId: '', hasAttachments: false, accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false }
+          {
+            id: "x1",
+            subject: "Topic",
+            recipients: ["r@e.com"],
+            sentDate: now,
+            body: "A",
+            summary: "A",
+            priority: "low" as const,
+            daysWithoutResponse: 0,
+            conversationId: "",
+            hasAttachments: false,
+            accountEmail: "user@example.com",
+            threadMessages: [],
+            isSnoozed: false,
+            isDismissed: false,
+          },
+          {
+            id: "x2",
+            subject: "Topic",
+            recipients: ["r@e.com"],
+            sentDate: new Date(now.getTime() - 5000),
+            body: "B",
+            summary: "B",
+            priority: "low" as const,
+            daysWithoutResponse: 0,
+            conversationId: "",
+            hasAttachments: false,
+            accountEmail: "user@example.com",
+            threadMessages: [],
+            isSnoozed: false,
+            isDismissed: false,
+          },
         ];
         const deduped = (service as any).dedupeFollowupEmails(fups);
         expect(deduped).toHaveLength(1);
-        expect(['x1']).toContain(deduped[0].id); // latest kept
+        expect(["x1"]).toContain(deduped[0].id); // latest kept
       });
 
-      it('should dedupe across different conversationIds for same human thread within window', () => {
-        const now = new Date('2025-02-01T12:00:00Z');
+      it("should dedupe across different conversationIds for same human thread within window", () => {
+        const now = new Date("2025-02-01T12:00:00Z");
         const a = {
-          id: 'a1', subject: 'Re: Everest Insurance (UK)', recipients: ['oleksii@client.com'], sentDate: new Date(now.getTime() - 60_000),
-          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-1', hasAttachments: false,
-          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+          id: "a1",
+          subject: "Re: Everest Insurance (UK)",
+          recipients: ["oleksii@client.com"],
+          sentDate: new Date(now.getTime() - 60_000),
+          body: "...",
+          summary: "...",
+          priority: "low" as const,
+          daysWithoutResponse: 0,
+          conversationId: "conv-1",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: [],
+          isSnoozed: false,
+          isDismissed: false,
         };
         const b = {
-          id: 'b1', subject: 'FW: Everest Insurance (UK)', recipients: ['oleksii@client.com'], sentDate: now,
-          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-2', hasAttachments: false,
-          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+          id: "b1",
+          subject: "FW: Everest Insurance (UK)",
+          recipients: ["oleksii@client.com"],
+          sentDate: now,
+          body: "...",
+          summary: "...",
+          priority: "low" as const,
+          daysWithoutResponse: 0,
+          conversationId: "conv-2",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: [],
+          isSnoozed: false,
+          isDismissed: false,
         };
         // Different convIds, same normalized subject/participants, within 3-day window => dedupe to latest (b)
         const deduped = (service as any).dedupeFollowupEmails([a, b]);
         expect(deduped).toHaveLength(1);
-        expect(deduped[0].id).toBe('b1');
+        expect(deduped[0].id).toBe("b1");
       });
 
-      it('should not dedupe across conversationIds when outside the time window', () => {
-        const now = new Date('2025-02-01T12:00:00Z');
+      it("should not dedupe across conversationIds when outside the time window", () => {
+        const now = new Date("2025-02-01T12:00:00Z");
         const a = {
-          id: 'a2', subject: 'Re: Project X', recipients: ['client@example.com'], sentDate: new Date(now.getTime() - (4 * 24 * 60 * 60 * 1000)),
-          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 4, conversationId: 'conv-10', hasAttachments: false,
-          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+          id: "a2",
+          subject: "Re: Project X",
+          recipients: ["client@example.com"],
+          sentDate: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000),
+          body: "...",
+          summary: "...",
+          priority: "low" as const,
+          daysWithoutResponse: 4,
+          conversationId: "conv-10",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: [],
+          isSnoozed: false,
+          isDismissed: false,
         };
         const b = {
-          id: 'b2', subject: 'FW: Project X', recipients: ['client@example.com'], sentDate: now,
-          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-11', hasAttachments: false,
-          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+          id: "b2",
+          subject: "FW: Project X",
+          recipients: ["client@example.com"],
+          sentDate: now,
+          body: "...",
+          summary: "...",
+          priority: "low" as const,
+          daysWithoutResponse: 0,
+          conversationId: "conv-11",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: [],
+          isSnoozed: false,
+          isDismissed: false,
         };
         const deduped = (service as any).dedupeFollowupEmails([a, b]);
         expect(deduped).toHaveLength(2);
       });
 
-      it('should not dedupe when participants differ', () => {
-        const now = new Date('2025-02-01T12:00:00Z');
+      it("should not dedupe when participants differ", () => {
+        const now = new Date("2025-02-01T12:00:00Z");
         const a = {
-          id: 'a3', subject: 'Re: Topic A', recipients: ['alice@x.com'], sentDate: new Date(now.getTime() - 60_000),
-          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-20', hasAttachments: false,
-          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+          id: "a3",
+          subject: "Re: Topic A",
+          recipients: ["alice@x.com"],
+          sentDate: new Date(now.getTime() - 60_000),
+          body: "...",
+          summary: "...",
+          priority: "low" as const,
+          daysWithoutResponse: 0,
+          conversationId: "conv-20",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: [],
+          isSnoozed: false,
+          isDismissed: false,
         };
         const b = {
-          id: 'b3', subject: 'FW: Topic A', recipients: ['bob@y.com'], sentDate: now,
-          body: '...', summary: '...', priority: 'low' as const, daysWithoutResponse: 0, conversationId: 'conv-21', hasAttachments: false,
-          accountEmail: 'user@example.com', threadMessages: [], isSnoozed: false, isDismissed: false
+          id: "b3",
+          subject: "FW: Topic A",
+          recipients: ["bob@y.com"],
+          sentDate: now,
+          body: "...",
+          summary: "...",
+          priority: "low" as const,
+          daysWithoutResponse: 0,
+          conversationId: "conv-21",
+          hasAttachments: false,
+          accountEmail: "user@example.com",
+          threadMessages: [],
+          isSnoozed: false,
+          isDismissed: false,
         };
         const deduped = (service as any).dedupeFollowupEmails([a, b]);
         expect(deduped).toHaveLength(2);
       });
     });
 
-    describe('Enhanced Thread Retrieval', () => {
+    describe("Enhanced Thread Retrieval", () => {
       beforeEach(() => {
         // Mock Office context
         (global as any).Office = {
           context: {
             mailbox: {
               userProfile: {
-                emailAddress: 'user@example.com'
-              }
-            }
-          }
+                emailAddress: "user@example.com",
+              },
+            },
+          },
         };
       });
 
-      it('should build deep traversal request for root folder (msgfolderroot)', async () => {
-        const spy = jest.spyOn(service as any, 'buildSearchConversationRequest');
+      it("should build deep traversal request for root folder (msgfolderroot)", async () => {
+        const spy = vi.spyOn(service as any, "buildSearchConversationRequest");
         // Force search across folders
-        jest.spyOn(service as any, 'searchConversationInFolder').mockImplementation(async (...args: any[]) => {
+        vi.spyOn(
+          service as any,
+          "searchConversationInFolder",
+        ).mockImplementation(async (...args: any[]) => {
           const conv = args[0];
-            const folder = args[1];
-          (service as any).buildSearchConversationRequest(conv, folder, folder === 'msgfolderroot' ? 'Deep' : 'Shallow');
+          const folder = args[1];
+          (service as any).buildSearchConversationRequest(
+            conv,
+            folder,
+            folder === "msgfolderroot" ? "Deep" : "Shallow",
+          );
           return [];
         });
-        await (service as any).searchConversationAcrossFolders('conv-deep');
-        const deepCall = spy.mock.calls.find(c => c[1] === 'msgfolderroot');
+        await (service as any).searchConversationAcrossFolders("conv-deep");
+        const deepCall = spy.mock.calls.find((c) => c[1] === "msgfolderroot");
         expect(deepCall).toBeDefined();
         if (deepCall) {
-          expect(deepCall[2]).toBe('Deep');
+          expect(deepCall[2]).toBe("Deep");
         }
         spy.mockRestore();
       });
 
-      it('should include archive and root folders in folder scan ordering', async () => {
+      it("should include archive and root folders in folder scan ordering", async () => {
         const foldersEncountered: string[] = [];
-        jest.spyOn(service as any, 'searchConversationInFolder').mockImplementation(async (...args: any[]) => {
+        vi.spyOn(
+          service as any,
+          "searchConversationInFolder",
+        ).mockImplementation(async (...args: any[]) => {
           const folder = args[1];
           foldersEncountered.push(folder);
           return [];
         });
-        await (service as any).searchConversationAcrossFolders('conv-folders');
-        ['sentitems','inbox','drafts','deleteditems','archive','msgfolderroot'].forEach(f => expect(foldersEncountered).toContain(f));
+        await (service as any).searchConversationAcrossFolders("conv-folders");
+        [
+          "sentitems",
+          "inbox",
+          "drafts",
+          "deleteditems",
+          "archive",
+          "msgfolderroot",
+        ].forEach((f) => expect(foldersEncountered).toContain(f));
       });
 
-      it('should search conversation across multiple folders', async () => {
+      it("should search conversation across multiple folders", async () => {
         // Mock the searchConversationAcrossFolders method
         const mockSearchResults: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Original Email',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Original message',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Original Email",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Original message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Re: Original Email',
-            from: 'client@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'),
-            body: 'Response message',
-            isFromCurrentUser: false
-          }
+            id: "msg2",
+            subject: "Re: Original Email",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"),
+            body: "Response message",
+            isFromCurrentUser: false,
+          },
         ];
 
-        jest.spyOn(service as any, 'searchConversationAcrossFolders')
-          .mockResolvedValue(mockSearchResults);
+        vi.spyOn(
+          service as any,
+          "searchConversationAcrossFolders",
+        ).mockResolvedValue(mockSearchResults);
 
-        jest.spyOn(service as any, 'parseConversationIdResponse')
-          .mockReturnValue('conv-123');
+        vi.spyOn(service as any, "parseConversationIdResponse").mockReturnValue(
+          "conv-123",
+        );
 
-        const result = await (service as any).searchConversationAcrossFolders('conv-123');
+        const result = await (service as any).searchConversationAcrossFolders(
+          "conv-123",
+        );
 
         expect(result).toHaveLength(2);
         expect(result[0].isFromCurrentUser).toBe(true);
         expect(result[1].isFromCurrentUser).toBe(false);
       });
 
-      it('should remove duplicate messages from search results', () => {
+      it("should remove duplicate messages from search results", () => {
         const duplicateMessages: ThreadMessage[] = [
           {
-            id: 'msg1',
-            subject: 'Test Email',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Test message',
-            isFromCurrentUser: true
+            id: "msg1",
+            subject: "Test Email",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Test message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg1', // Same ID - should be deduplicated
-            subject: 'Test Email',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Test message',
-            isFromCurrentUser: true
+            id: "msg1", // Same ID - should be deduplicated
+            subject: "Test Email",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Test message",
+            isFromCurrentUser: true,
           },
           {
-            id: 'msg2',
-            subject: 'Different Email',
-            from: 'client@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-21T10:00:00Z'),
-            body: 'Different message',
-            isFromCurrentUser: false
-          }
+            id: "msg2",
+            subject: "Different Email",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-21T10:00:00Z"),
+            body: "Different message",
+            isFromCurrentUser: false,
+          },
         ];
 
-        const uniqueMessages = (service as any).removeDuplicateMessages(duplicateMessages);
+        const uniqueMessages = (service as any).removeDuplicateMessages(
+          duplicateMessages,
+        );
 
         expect(uniqueMessages).toHaveLength(2);
-        expect(uniqueMessages[0].id).toBe('msg1');
-        expect(uniqueMessages[1].id).toBe('msg2');
+        expect(uniqueMessages[0].id).toBe("msg1");
+        expect(uniqueMessages[1].id).toBe("msg2");
       });
 
-      it('should handle messages without IDs using content-based deduplication', () => {
+      it("should handle messages without IDs using content-based deduplication", () => {
         const messagesWithoutIds: ThreadMessage[] = [
           {
-            id: '',
-            subject: 'Test Email',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Test message',
-            isFromCurrentUser: true
+            id: "",
+            subject: "Test Email",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Test message",
+            isFromCurrentUser: true,
           },
           {
-            id: '',
-            subject: 'Test Email', // Same content - should be deduplicated
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'),
-            body: 'Test message',
-            isFromCurrentUser: true
-          }
+            id: "",
+            subject: "Test Email", // Same content - should be deduplicated
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Test message",
+            isFromCurrentUser: true,
+          },
         ];
 
-        const uniqueMessages = (service as any).removeDuplicateMessages(messagesWithoutIds);
+        const uniqueMessages = (service as any).removeDuplicateMessages(
+          messagesWithoutIds,
+        );
 
         expect(uniqueMessages).toHaveLength(1);
       });
 
-      it('should sort messages chronologically', async () => {
+      it("should sort messages chronologically", async () => {
         const unsortedMessages: ThreadMessage[] = [
           {
-            id: 'msg2',
-            subject: 'Second Email',
-            from: 'client@example.com',
-            to: ['user@example.com'],
-            sentDate: new Date('2025-01-22T15:00:00Z'), // Later date: 1737558000000
-            body: 'Second message',
-            isFromCurrentUser: false
+            id: "msg2",
+            subject: "Second Email",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-22T15:00:00Z"), // Later date: 1737558000000
+            body: "Second message",
+            isFromCurrentUser: false,
           },
           {
-            id: 'msg1',
-            subject: 'First Email',
-            from: 'user@example.com',
-            to: ['client@example.com'],
-            sentDate: new Date('2025-01-20T10:00:00Z'), // Earlier date: 1737367200000
-            body: 'First message',
-            isFromCurrentUser: true
-          }
+            id: "msg1",
+            subject: "First Email",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"), // Earlier date: 1737367200000
+            body: "First message",
+            isFromCurrentUser: true,
+          },
         ];
 
         // Mock the individual folder searches to return messages in different orders
-        const mockSearchConversationInFolder = jest.spyOn(service as any, 'searchConversationInFolder')
+        const mockSearchConversationInFolder = vi
+          .spyOn(service as any, "searchConversationInFolder")
           .mockImplementation(async (...args: any[]) => {
             const [, folderId] = args;
-            if (folderId === 'sentitems') {
+            if (folderId === "sentitems") {
               return [unsortedMessages[1]]; // Return msg1 from sent items
-            } else if (folderId === 'inbox') {
+            } else if (folderId === "inbox") {
               return [unsortedMessages[0]]; // Return msg2 from inbox
             }
             return [];
           });
 
         // Mock the removeDuplicateMessages to return the messages as-is (no duplicates in this test)
-        const mockRemoveDuplicateMessages = jest.spyOn(service as any, 'removeDuplicateMessages')
+        const mockRemoveDuplicateMessages = vi
+          .spyOn(service as any, "removeDuplicateMessages")
           .mockImplementation((...args: any[]) => {
             const [messages] = args;
             return messages;
           });
 
-        const result = await (service as any).searchConversationAcrossFolders('conv-123');
+        const result = await (service as any).searchConversationAcrossFolders(
+          "conv-123",
+        );
 
         // Verify the result is sorted chronologically (earliest first)
         expect(result).toHaveLength(2);
-        expect(result[0].sentDate.getTime()).toBeLessThan(result[1].sentDate.getTime());
-        expect(result[0].id).toBe('msg1'); // Earlier message first (2025-01-20)
-        expect(result[1].id).toBe('msg2'); // Later message second (2025-01-22)
-        
+        expect(result[0].sentDate.getTime()).toBeLessThan(
+          result[1].sentDate.getTime(),
+        );
+        expect(result[0].id).toBe("msg1"); // Earlier message first (2025-01-20)
+        expect(result[1].id).toBe("msg2"); // Later message second (2025-01-22)
+
         // Additional verification with actual timestamps
         expect(result[0].sentDate.getTime()).toBe(1737367200000); // 2025-01-20T10:00:00Z
         expect(result[1].sentDate.getTime()).toBe(1737558000000); // 2025-01-22T15:00:00Z
@@ -985,72 +1286,141 @@ describe('EmailAnalysisService', () => {
         mockRemoveDuplicateMessages.mockRestore();
       });
 
-      it('should build an artificial thread from recent emails when only single message is available', async () => {
+      it("should build an artificial thread from recent emails when only single message is available", async () => {
         // Set up Office context for current user
-        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
-        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+        (global as any).Office = {
+          context: {
+            mailbox: { userProfile: { emailAddress: "user@example.com" } },
+          },
+        };
+        const { EmailAnalysisService } = await import(
+          "../../src/services/EmailAnalysisService"
+        );
+        const serviceLocal = new EmailAnalysisService();
         // Seed recent emails context mimicking FindItem results
         (serviceLocal as any).recentEmailsContext = [
           {
-            id: 'r1',
-            subject: 'Re: Deal Update',
-            dateTimeSent: '2025-02-01T12:01:00Z',
-            conversationId: 'other-1',
-            body: { content: 'Hi team, replying to your note: Please find details below... ORIGINAL BODY: hello client, here are details' },
-            from: { emailAddress: { address: 'client@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ],
-            ccRecipients: []
+            id: "r1",
+            subject: "Re: Deal Update",
+            dateTimeSent: "2025-02-01T12:01:00Z",
+            conversationId: "other-1",
+            body: {
+              content:
+                "Hi team, replying to your note: Please find details below... ORIGINAL BODY: hello client, here are details",
+            },
+            from: { emailAddress: { address: "client@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
           },
           {
-            id: 'r2',
-            subject: 'FW: Deal Update',
-            dateTimeSent: '2025-02-01T12:03:00Z',
-            conversationId: 'other-2',
-            body: { content: 'Fwd content... ORIGINAL BODY: hello client, here are details' },
-            from: { emailAddress: { address: 'colleague@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ],
-            ccRecipients: [ { emailAddress: { address: 'client@example.com' } } ]
-          }
+            id: "r2",
+            subject: "FW: Deal Update",
+            dateTimeSent: "2025-02-01T12:03:00Z",
+            conversationId: "other-2",
+            body: {
+              content:
+                "Fwd content... ORIGINAL BODY: hello client, here are details",
+            },
+            from: { emailAddress: { address: "colleague@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [{ emailAddress: { address: "client@example.com" } }],
+          },
         ];
 
         const base: any = {
-          id: 'base1', subject: 'Deal Update', from: 'user@example.com', to: ['client@example.com'],
-          sentDate: new Date('2025-02-01T12:00:00Z'), body: 'Hello client, here are details', isFromCurrentUser: true
+          id: "base1",
+          subject: "Deal Update",
+          from: "user@example.com",
+          to: ["client@example.com"],
+          sentDate: new Date("2025-02-01T12:00:00Z"),
+          body: "Hello client, here are details",
+          isFromCurrentUser: true,
         };
 
-        const artificial = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        const artificial = (
+          serviceLocal as any
+        ).buildArtificialThreadFromRecentEmails(base, "user@example.com");
         expect(artificial.length).toBeGreaterThan(1);
         // Should include r1 since it quotes the base and matches normalized subject
-        expect(artificial.some((m: any) => m.id === 'r1')).toBe(true);
+        expect(artificial.some((m: any) => m.id === "r1")).toBe(true);
       });
     });
 
-    describe('ConversationId-first Retrieval Path', () => {
+    describe("ConversationId-first Retrieval Path", () => {
       let ewsSpy: jest.SpyInstance;
       beforeEach(() => {
-        ewsSpy = jest.spyOn(service as any, 'isEwsAvailable').mockReturnValue(true);
+        ewsSpy = vi
+          .spyOn(service as any, "isEwsAvailable")
+          .mockReturnValue(true);
       });
       afterEach(() => {
         ewsSpy.mockRestore();
       });
 
-      it('should use GetConversationItems path and skip folder/item fallbacks', async () => {
-        const convId = 'conv-use-first';
+      it("should use GetConversationItems path and skip folder/item fallbacks", async () => {
+        const convId = "conv-use-first";
         const thread: ThreadMessage[] = [
-          { id: 't1', subject: 'Question', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Hi', isFromCurrentUser: false },
-          { id: 't2', subject: 'Re: Question', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-21T10:00:00Z'), body: 'Answer', isFromCurrentUser: true }
+          {
+            id: "t1",
+            subject: "Question",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Hi",
+            isFromCurrentUser: false,
+          },
+          {
+            id: "t2",
+            subject: "Re: Question",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-21T10:00:00Z"),
+            body: "Answer",
+            isFromCurrentUser: true,
+          },
         ];
-        const spyConvItems = jest.spyOn(service as any, 'getConversationItemsConversationCached').mockResolvedValue(thread);
-        const spyFolderPath = jest.spyOn(service as any, 'getConversationThreadFromConversationIdCached').mockResolvedValue([]);
-        const spyItem = jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue([]);
-        const spyCreate = jest.spyOn(service as any, 'createFollowupEmailEnhanced').mockImplementation(async (...args: any[]) => {
-          const last: ThreadMessage = args[1];
-          const all: ThreadMessage[] = args[2];
-          return { id: last.id, subject: last.subject, recipients: last.to, sentDate: last.sentDate, body: last.body, summary: last.body, priority: 'low', daysWithoutResponse: 1, conversationId: convId, hasAttachments: false, accountEmail: last.from, threadMessages: all, isSnoozed: false, isDismissed: false };
-        });
-        const result = await (service as any).processConversationWithCaching(convId, [{ id: 'seedMessage' }], 'user@example.com', []);
+        const spyConvItems = vi
+          .spyOn(service as any, "getConversationItemsConversationCached")
+          .mockResolvedValue(thread);
+        const spyFolderPath = vi
+          .spyOn(
+            service as any,
+            "getConversationThreadFromConversationIdCached",
+          )
+          .mockResolvedValue([]);
+        const spyItem = vi
+          .spyOn(service as any, "getConversationThreadCached")
+          .mockResolvedValue([]);
+        const spyCreate = vi
+          .spyOn(service as any, "createFollowupEmailEnhanced")
+          .mockImplementation(async (...args: any[]) => {
+            const last: ThreadMessage = args[1];
+            const all: ThreadMessage[] = args[2];
+            return {
+              id: last.id,
+              subject: last.subject,
+              recipients: last.to,
+              sentDate: last.sentDate,
+              body: last.body,
+              summary: last.body,
+              priority: "low",
+              daysWithoutResponse: 1,
+              conversationId: convId,
+              hasAttachments: false,
+              accountEmail: last.from,
+              threadMessages: all,
+              isSnoozed: false,
+              isDismissed: false,
+            };
+          });
+        const result = await (service as any).processConversationWithCaching(
+          convId,
+          [{ id: "seedMessage" }],
+          "user@example.com",
+          [],
+        );
         expect(result).not.toBeNull();
-        expect(result.id).toBe('t2');
+        expect(result.id).toBe("t2");
         expect(spyConvItems).toHaveBeenCalledTimes(1);
         expect(spyFolderPath).not.toHaveBeenCalled();
         expect(spyItem).not.toHaveBeenCalled();
@@ -1060,24 +1430,71 @@ describe('EmailAnalysisService', () => {
         spyCreate.mockRestore();
       });
 
-      it('should fallback to item retrieval when GetConversationItems returns empty', async () => {
-        const convId = 'conv-fallback';
+      it("should fallback to item retrieval when GetConversationItems returns empty", async () => {
+        const convId = "conv-fallback";
         const fallbackThread: ThreadMessage[] = [
-          { id: 'fb1', subject: 'Need Help', from: 'client@example.com', to: ['user@example.com'], sentDate: new Date('2025-01-20T09:00:00Z'), body: 'Need info', isFromCurrentUser: false },
-          { id: 'fb2', subject: 'Re: Need Help', from: 'user@example.com', to: ['client@example.com'], sentDate: new Date('2025-01-20T10:00:00Z'), body: 'Provided', isFromCurrentUser: true }
+          {
+            id: "fb1",
+            subject: "Need Help",
+            from: "client@example.com",
+            to: ["user@example.com"],
+            sentDate: new Date("2025-01-20T09:00:00Z"),
+            body: "Need info",
+            isFromCurrentUser: false,
+          },
+          {
+            id: "fb2",
+            subject: "Re: Need Help",
+            from: "user@example.com",
+            to: ["client@example.com"],
+            sentDate: new Date("2025-01-20T10:00:00Z"),
+            body: "Provided",
+            isFromCurrentUser: true,
+          },
         ];
-        const spyConvItems = jest.spyOn(service as any, 'getConversationItemsConversationCached').mockResolvedValue([]);
+        const spyConvItems = vi
+          .spyOn(service as any, "getConversationItemsConversationCached")
+          .mockResolvedValue([]);
         // Folder-based fallback removed from main path; ensure item-based fallback is used
-        const spyFolderPath = jest.spyOn(service as any, 'getConversationThreadFromConversationIdCached').mockResolvedValue([]);
-        const spyItem = jest.spyOn(service as any, 'getConversationThreadCached').mockResolvedValue(fallbackThread);
-        const spyCreate = jest.spyOn(service as any, 'createFollowupEmailEnhanced').mockImplementation(async (...args: any[]) => {
-          const last: ThreadMessage = args[1];
-          const all: ThreadMessage[] = args[2];
-          return { id: last.id, subject: last.subject, recipients: last.to, sentDate: last.sentDate, body: last.body, summary: last.body, priority: 'low', daysWithoutResponse: 1, conversationId: convId, hasAttachments: false, accountEmail: last.from, threadMessages: all, isSnoozed: false, isDismissed: false };
-        });
-        const result = await (service as any).processConversationWithCaching(convId, [{ id: 'seedMessage' }], 'user@example.com', []);
+        const spyFolderPath = vi
+          .spyOn(
+            service as any,
+            "getConversationThreadFromConversationIdCached",
+          )
+          .mockResolvedValue([]);
+        const spyItem = vi
+          .spyOn(service as any, "getConversationThreadCached")
+          .mockResolvedValue(fallbackThread);
+        const spyCreate = vi
+          .spyOn(service as any, "createFollowupEmailEnhanced")
+          .mockImplementation(async (...args: any[]) => {
+            const last: ThreadMessage = args[1];
+            const all: ThreadMessage[] = args[2];
+            return {
+              id: last.id,
+              subject: last.subject,
+              recipients: last.to,
+              sentDate: last.sentDate,
+              body: last.body,
+              summary: last.body,
+              priority: "low",
+              daysWithoutResponse: 1,
+              conversationId: convId,
+              hasAttachments: false,
+              accountEmail: last.from,
+              threadMessages: all,
+              isSnoozed: false,
+              isDismissed: false,
+            };
+          });
+        const result = await (service as any).processConversationWithCaching(
+          convId,
+          [{ id: "seedMessage" }],
+          "user@example.com",
+          [],
+        );
         expect(result).not.toBeNull();
-        expect(result.id).toBe('fb2');
+        expect(result.id).toBe("fb2");
         expect(spyConvItems).toHaveBeenCalledTimes(1);
         expect(spyFolderPath).not.toHaveBeenCalled();
         expect(spyItem).toHaveBeenCalledTimes(1);
@@ -1088,166 +1505,282 @@ describe('EmailAnalysisService', () => {
       });
     });
 
-    describe('Artificial threading strict containment chain', () => {
-      it('builds a multi-hop chain A→B→C and suppresses follow-up when C is from other user', () => {
-        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
-        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+    describe("Artificial threading strict containment chain", () => {
+      it("builds a multi-hop chain A→B→C and suppresses follow-up when C is from other user", async () => {
+        (global as any).Office = {
+          context: {
+            mailbox: { userProfile: { emailAddress: "user@example.com" } },
+          },
+        };
+        const { EmailAnalysisService } = await import(
+          "../../src/services/EmailAnalysisService"
+        );
+        const serviceLocal = new EmailAnalysisService();
         (serviceLocal as any).recentEmailsContext = [
           {
-            id: 'b', subject: 'Re: Quote Request', dateTimeSent: '2025-03-01T10:05:00Z',
-            from: { emailAddress: { address: 'user@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'client@example.com' } } ], ccRecipients: [],
-            body: { content: 'Follow-up with details... previous: hello client, can you send specs?' }
+            id: "b",
+            subject: "Re: Quote Request",
+            dateTimeSent: "2025-03-01T10:05:00Z",
+            from: { emailAddress: { address: "user@example.com" } },
+            toRecipients: [{ emailAddress: { address: "client@example.com" } }],
+            ccRecipients: [],
+            body: {
+              content:
+                "Follow-up with details... previous: hello client, can you send specs?",
+            },
           },
           {
-            id: 'c', subject: 'Re: Quote Request', dateTimeSent: '2025-03-01T10:15:00Z',
-            from: { emailAddress: { address: 'client@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-            body: { content: 'Thanks, here are the specs. quoting: follow-up with details... previous: hello client, can you send specs?' }
-          }
+            id: "c",
+            subject: "Re: Quote Request",
+            dateTimeSent: "2025-03-01T10:15:00Z",
+            from: { emailAddress: { address: "client@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: {
+              content:
+                "Thanks, here are the specs. quoting: follow-up with details... previous: hello client, can you send specs?",
+            },
+          },
         ];
 
         const base: any = {
-          id: 'a', subject: 'Quote Request', from: 'user@example.com', to: ['client@example.com'],
-          sentDate: new Date('2025-03-01T10:00:00Z'), body: 'Hello client, can you send specs?', isFromCurrentUser: true
+          id: "a",
+          subject: "Quote Request",
+          from: "user@example.com",
+          to: ["client@example.com"],
+          sentDate: new Date("2025-03-01T10:00:00Z"),
+          body: "Hello client, can you send specs?",
+          isFromCurrentUser: true,
         };
 
-        const chain = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
-        expect(chain.map((m: any) => m.id)).toEqual(['a', 'b', 'c']);
+        const chain = (
+          serviceLocal as any
+        ).buildArtificialThreadFromRecentEmails(base, "user@example.com");
+        expect(chain.map((m: any) => m.id)).toEqual(["a", "b", "c"]);
         expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
       });
 
-      it('ends chain when containment breaks and uses last contained message for decision', () => {
-        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
-        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+      it("ends chain when containment breaks and uses last contained message for decision", async () => {
+        (global as any).Office = {
+          context: {
+            mailbox: { userProfile: { emailAddress: "user@example.com" } },
+          },
+        };
+        const { EmailAnalysisService } = await import(
+          "../../src/services/EmailAnalysisService"
+        );
+        const serviceLocal = new EmailAnalysisService();
         (serviceLocal as any).recentEmailsContext = [
           {
-            id: 'b', subject: 'Re: Timeline', dateTimeSent: '2025-04-01T09:10:00Z',
-            from: { emailAddress: { address: 'client@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-            body: { content: 'Reply includes: initial plan for delivery' }
+            id: "b",
+            subject: "Re: Timeline",
+            dateTimeSent: "2025-04-01T09:10:00Z",
+            from: { emailAddress: { address: "client@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: { content: "Reply includes: initial plan for delivery" },
           },
           {
-            id: 'c', subject: 'Re: Timeline', dateTimeSent: '2025-04-01T09:20:00Z',
-            from: { emailAddress: { address: 'client@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-            body: { content: 'New unrelated content that does not contain previous reply' }
-          }
+            id: "c",
+            subject: "Re: Timeline",
+            dateTimeSent: "2025-04-01T09:20:00Z",
+            from: { emailAddress: { address: "client@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: {
+              content:
+                "New unrelated content that does not contain previous reply",
+            },
+          },
         ];
 
         const base: any = {
-          id: 'a', subject: 'Timeline', from: 'user@example.com', to: ['client@example.com'],
-          sentDate: new Date('2025-04-01T09:00:00Z'), body: 'Initial plan for delivery', isFromCurrentUser: true
+          id: "a",
+          subject: "Timeline",
+          from: "user@example.com",
+          to: ["client@example.com"],
+          sentDate: new Date("2025-04-01T09:00:00Z"),
+          body: "Initial plan for delivery",
+          isFromCurrentUser: true,
         };
 
-        const chain = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
-        expect(chain.map((m: any) => m.id)).toEqual(['a', 'b']);
+        const chain = (
+          serviceLocal as any
+        ).buildArtificialThreadFromRecentEmails(base, "user@example.com");
+        expect(chain.map((m: any) => m.id)).toEqual(["a", "b"]);
         expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
       });
 
-      it('skips short/noisy bodies and still builds valid chain', () => {
-        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
-        const serviceLocal = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+      it("skips short/noisy bodies and still builds valid chain", async () => {
+        (global as any).Office = {
+          context: {
+            mailbox: { userProfile: { emailAddress: "user@example.com" } },
+          },
+        };
+        const { EmailAnalysisService } = await import(
+          "../../src/services/EmailAnalysisService"
+        );
+        const serviceLocal = new EmailAnalysisService();
         (serviceLocal as any).recentEmailsContext = [
           {
-            id: 'b', subject: 'Re: Access', dateTimeSent: '2025-05-01T11:05:00Z',
-            from: { emailAddress: { address: 'user@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'client@example.com' } } ], ccRecipients: [],
-            body: { content: 'Ok.' } // too short; should be skipped in chain building
+            id: "b",
+            subject: "Re: Access",
+            dateTimeSent: "2025-05-01T11:05:00Z",
+            from: { emailAddress: { address: "user@example.com" } },
+            toRecipients: [{ emailAddress: { address: "client@example.com" } }],
+            ccRecipients: [],
+            body: { content: "Ok." }, // too short; should be skipped in chain building
           },
           {
-            id: 'c', subject: 'Re: Access', dateTimeSent: '2025-05-01T11:10:00Z',
-            from: { emailAddress: { address: 'client@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-            body: { content: 'Including your message: access instructions and credentials shared yesterday.' }
-          }
+            id: "c",
+            subject: "Re: Access",
+            dateTimeSent: "2025-05-01T11:10:00Z",
+            from: { emailAddress: { address: "client@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: {
+              content:
+                "Including your message: access instructions and credentials shared yesterday.",
+            },
+          },
         ];
 
         const base: any = {
-          id: 'a', subject: 'Access', from: 'user@example.com', to: ['client@example.com'],
-          sentDate: new Date('2025-05-01T11:00:00Z'), body: 'Access instructions and credentials shared yesterday.', isFromCurrentUser: true
+          id: "a",
+          subject: "Access",
+          from: "user@example.com",
+          to: ["client@example.com"],
+          sentDate: new Date("2025-05-01T11:00:00Z"),
+          body: "Access instructions and credentials shared yesterday.",
+          isFromCurrentUser: true,
         };
 
-        const chain = (serviceLocal as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
-        expect(chain.map((m: any) => m.id)).toEqual(['a', 'c']);
+        const chain = (
+          serviceLocal as any
+        ).buildArtificialThreadFromRecentEmails(base, "user@example.com");
+        expect(chain.map((m: any) => m.id)).toEqual(["a", "c"]);
         expect(chain[chain.length - 1].isFromCurrentUser).toBe(false);
       });
 
-      it('binds base subject and Re:/FW: variants via normalizeSubject', () => {
-        (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
-        const svc = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
+      it("binds base subject and Re:/FW: variants via normalizeSubject", async () => {
+        (global as any).Office = {
+          context: {
+            mailbox: { userProfile: { emailAddress: "user@example.com" } },
+          },
+        };
+        const { EmailAnalysisService } = await import(
+          "../../src/services/EmailAnalysisService"
+        );
+        const svc = new EmailAnalysisService();
         (svc as any).recentEmailsContext = [
           {
-            id: 'r1', subject: 'Re: Need to discuss new add-in', dateTimeSent: '2025-08-04T20:10:29Z',
-            from: { emailAddress: { address: 'other@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-            body: { content: 'Replying... quoting: let\'s discuss the new add-in features soon.' }
+            id: "r1",
+            subject: "Re: Need to discuss new add-in",
+            dateTimeSent: "2025-08-04T20:10:29Z",
+            from: { emailAddress: { address: "other@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: {
+              content:
+                "Replying... quoting: let's discuss the new add-in features soon.",
+            },
           },
           {
-            id: 'r2', subject: 'FW: Need to discuss new add-in', dateTimeSent: '2025-08-04T20:12:00Z',
-            from: { emailAddress: { address: 'colleague@example.com' } },
-            toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-            body: { content: 'Fwd FYI: let\'s discuss the new add-in features soon.' }
-          }
+            id: "r2",
+            subject: "FW: Need to discuss new add-in",
+            dateTimeSent: "2025-08-04T20:12:00Z",
+            from: { emailAddress: { address: "colleague@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: {
+              content: "Fwd FYI: let's discuss the new add-in features soon.",
+            },
+          },
         ];
         const base: any = {
-          id: 'b', subject: 'Need to discuss new add-in', from: 'user@example.com', to: ['other@example.com'],
-          sentDate: new Date('2025-08-04T11:50:08Z'), body: "Let's discuss the new add-in features soon.", isFromCurrentUser: true
+          id: "b",
+          subject: "Need to discuss new add-in",
+          from: "user@example.com",
+          to: ["other@example.com"],
+          sentDate: new Date("2025-08-04T11:50:08Z"),
+          body: "Let's discuss the new add-in features soon.",
+          isFromCurrentUser: true,
         };
-        const chain = (svc as any).buildArtificialThreadFromRecentEmails(base, 'user@example.com');
+        const chain = (svc as any).buildArtificialThreadFromRecentEmails(
+          base,
+          "user@example.com",
+        );
         expect(chain.length).toBeGreaterThan(1);
         // Should include r1 at minimum since it quotes the base and matches normalized subject
-        expect(chain.some((m: any) => m.id === 'r1')).toBe(true);
+        expect(chain.some((m: any) => m.id === "r1")).toBe(true);
       });
     });
 
-  describe('Subject normalization and suppression logging', () => {
-    it('normalizes reply/forward prefixes including counts and localized variants', () => {
-      const norm = (service as any).normalizeSubject.bind(service);
-      expect(norm('Re: Hello')).toBe('hello');
-      expect(norm('RE:  Hello  World')).toBe('hello world');
-      expect(norm('Re[2]: Hello')).toBe('hello');
-      expect(norm('FW: Hello')).toBe('hello');
-      expect(norm('Fwd: Hello')).toBe('hello');
-      expect(norm('Antwort: Hallo')).toBe('hallo');
-      expect(norm('回复: 您好')).toBe('您好');
-      expect(norm('转发: 您好')).toBe('您好');
+    describe("Subject normalization and suppression logging", () => {
+      it("normalizes reply/forward prefixes including counts and localized variants", () => {
+        const norm = (service as any).normalizeSubject.bind(service);
+        expect(norm("Re: Hello")).toBe("hello");
+        expect(norm("RE:  Hello  World")).toBe("hello world");
+        expect(norm("Re[2]: Hello")).toBe("hello");
+        expect(norm("FW: Hello")).toBe("hello");
+        expect(norm("Fwd: Hello")).toBe("hello");
+        expect(norm("Antwort: Hallo")).toBe("hallo");
+        expect(norm("回复: 您好")).toBe("您好");
+        expect(norm("转发: 您好")).toBe("您好");
+      });
+
+      it("suppresses single-email follow-up when newer same-subject from other exists", async () => {
+        (global as any).Office = {
+          context: {
+            mailbox: { userProfile: { emailAddress: "user@example.com" } },
+          },
+        };
+        const { EmailAnalysisService } = await import(
+          "../../src/services/EmailAnalysisService"
+        );
+        const svc = new EmailAnalysisService();
+        (svc as any).recentEmailsContext = [
+          {
+            id: "n1",
+            subject: "Re: Demo",
+            dateTimeSent: new Date("2025-02-02T10:00:00Z").toISOString(),
+            from: { emailAddress: { address: "other@example.com" } },
+            toRecipients: [{ emailAddress: { address: "user@example.com" } }],
+            ccRecipients: [],
+            body: { content: "Quoting: can we schedule the demo tomorrow?" },
+          },
+        ];
+        const base: ThreadMessage = {
+          id: "b1",
+          subject: "Demo",
+          from: "user@example.com",
+          to: ["other@example.com"],
+          sentDate: new Date("2025-02-02T09:00:00Z"),
+          body: "Can we schedule the demo tomorrow?",
+          isFromCurrentUser: true,
+        } as any;
+        const suppressed = (svc as any).hasNewerOtherWithSameSubject(
+          base,
+          "user@example.com",
+        );
+        expect(suppressed).toBe(true);
+      });
     });
 
-    it('suppresses single-email follow-up when newer same-subject from other exists', () => {
-      (global as any).Office = { context: { mailbox: { userProfile: { emailAddress: 'user@example.com' } } } };
-      const svc = new (require('../../src/services/EmailAnalysisService').EmailAnalysisService)();
-      (svc as any).recentEmailsContext = [
-        {
-          id: 'n1', subject: 'Re: Demo', dateTimeSent: new Date('2025-02-02T10:00:00Z').toISOString(),
-          from: { emailAddress: { address: 'other@example.com' } },
-          toRecipients: [ { emailAddress: { address: 'user@example.com' } } ], ccRecipients: [],
-          body: { content: 'Quoting: can we schedule the demo tomorrow?' }
-        }
-      ];
-      const base: ThreadMessage = {
-        id: 'b1', subject: 'Demo', from: 'user@example.com', to: ['other@example.com'],
-        sentDate: new Date('2025-02-02T09:00:00Z'), body: 'Can we schedule the demo tomorrow?', isFromCurrentUser: true
-      } as any;
-      const suppressed = (svc as any).hasNewerOtherWithSameSubject(base, 'user@example.com');
-      expect(suppressed).toBe(true);
-    });
-  });
-
-    describe('parseGetConversationItemsResponse', () => {
+    describe("parseGetConversationItemsResponse", () => {
       beforeEach(() => {
         // Ensure current user email matches the XML for deterministic assertions
         (global as any).Office = {
           context: {
             mailbox: {
               userProfile: {
-                emailAddress: 'test@example.com'
-              }
-            }
-          }
+                emailAddress: "test@example.com",
+              },
+            },
+          },
         };
       });
-      it('should parse messages and sort chronologically by received or sent date', () => {
+      it("should parse messages and sort chronologically by received or sent date", () => {
         const xml = `<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
   <s:Body>
@@ -1289,11 +1822,13 @@ describe('EmailAnalysisService', () => {
   </s:Body>
 </s:Envelope>`;
 
-        const parsed = (service as any).parseGetConversationItemsResponse(xml) as ThreadMessage[];
+        const parsed = (service as any).parseGetConversationItemsResponse(
+          xml,
+        ) as ThreadMessage[];
         expect(parsed.length).toBe(2);
         // Sorted chronologically by receivedDate/sentDate ascending
-        expect(parsed[0].id).toBe('id-1');
-        expect(parsed[1].id).toBe('id-2');
+        expect(parsed[0].id).toBe("id-1");
+        expect(parsed[1].id).toBe("id-2");
         expect(parsed[0].isFromCurrentUser).toBe(false);
         expect(parsed[1].isFromCurrentUser).toBe(true);
       });
