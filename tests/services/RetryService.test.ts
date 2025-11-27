@@ -67,7 +67,13 @@ describe("RetryService", () => {
       const promise = retryService.executeWithRetry(operation, {
         maxAttempts: 3,
       });
+      
+      // Run all timers and wait for all async operations
       await vi.runAllTimersAsync();
+      // Switch to real timers to ensure all promise rejections are handled
+      vi.useRealTimers();
+      // Small delay to ensure all async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       await expect(promise).rejects.toThrow("Persistent failure");
       expect(operation).toHaveBeenCalledTimes(3);
@@ -116,6 +122,10 @@ describe("RetryService", () => {
       });
 
       await vi.runAllTimersAsync();
+      // Switch to real timers to ensure all promise rejections are handled
+      vi.useRealTimers();
+      // Small delay to ensure all async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 10));
       await expect(promise).rejects.toThrow();
 
       // Verify delays increase (don't check exact values - too fragile)
@@ -143,6 +153,10 @@ describe("RetryService", () => {
       });
 
       await vi.runAllTimersAsync();
+      // Switch to real timers to ensure all promise rejections are handled
+      vi.useRealTimers();
+      // Small delay to ensure all async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 10));
       await expect(promise).rejects.toThrow();
 
       onRetry.mock.calls.forEach((call) => {
@@ -437,6 +451,10 @@ describe("RetryService", () => {
         maxAttempts: 5,
       });
       await vi.runAllTimersAsync();
+      // Switch to real timers to ensure all promise rejections are handled
+      vi.useRealTimers();
+      // Small delay to ensure all async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       await expect(promise).rejects.toThrow("Invalid request");
       expect(operation).toHaveBeenCalledTimes(2);
@@ -569,6 +587,10 @@ describe("RetryService", () => {
         maxAttempts: 2,
       });
       await vi.runAllTimersAsync();
+      // Switch to real timers to ensure all promise rejections are handled
+      vi.useRealTimers();
+      // Small delay to ensure all async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       try {
         await promise;

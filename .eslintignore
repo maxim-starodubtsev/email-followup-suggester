@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.min.js
+coverage/
+.vscode/
+.idea/
+*.log
+*.map
+*.d.ts
+*.d.ts.map
+

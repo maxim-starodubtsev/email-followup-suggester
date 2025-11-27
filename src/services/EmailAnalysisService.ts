@@ -119,6 +119,18 @@ export class EmailAnalysisService {
     });
 
     try {
+      // Check if Office.context is available before trying to use it
+      if (
+        typeof Office === "undefined" ||
+        !Office.context ||
+        !Office.context.mailbox ||
+        !Office.context.mailbox.userProfile
+      ) {
+        throw new Error(
+          "Office.context.mailbox is not available. This feature requires running in Outlook.",
+        );
+      }
+
       const currentUserEmail = Office.context.mailbox.userProfile.emailAddress;
       this.logDebug(`[DEBUG] Current user email: ${currentUserEmail}`);
 
@@ -479,6 +491,12 @@ export class EmailAnalysisService {
     emailCount: number,
     cutoffDate: Date,
   ): Promise<any[]> {
+    if (!this.isEwsAvailable()) {
+      throw new Error(
+        "Office.context.mailbox is not available. This feature requires running in Outlook.",
+      );
+    }
+
     return new Promise((resolve, reject) => {
       Office.context.mailbox.makeEwsRequestAsync(
         this.buildGetInboxEmailsRequest(emailCount, cutoffDate),
@@ -852,6 +870,12 @@ export class EmailAnalysisService {
   private async getConversationItems(
     conversationId: string,
   ): Promise<ThreadMessage[]> {
+    if (!this.isEwsAvailable()) {
+      throw new Error(
+        "Office.context.mailbox is not available. This feature requires running in Outlook.",
+      );
+    }
+
     return new Promise((resolve, reject) => {
       Office.context.mailbox.makeEwsRequestAsync(
         this.buildGetConversationItemsRequest(conversationId),
@@ -876,8 +900,14 @@ export class EmailAnalysisService {
   }
 
   private parseGetConversationItemsResponse(xml: string): ThreadMessage[] {
-    const currentUserEmail =
-      Office.context.mailbox.userProfile.emailAddress.toLowerCase();
+    const currentUserEmailRaw = this.getCurrentUserEmail();
+    if (!currentUserEmailRaw) {
+      console.warn(
+        "Cannot parse conversation items: Office.context.mailbox.userProfile not available",
+      );
+      return [];
+    }
+    const currentUserEmail = currentUserEmailRaw.toLowerCase();
     const parser = new DOMParser();
     const doc = parser.parseFromString(xml, "text/xml");
     const messages: ThreadMessage[] = [];
@@ -1076,11 +1106,37 @@ export class EmailAnalysisService {
   private isEwsAvailable(): boolean {
     try {
       return (
-        typeof (Office as any)?.context?.mailbox?.makeEwsRequestAsync ===
-        "function"
+        typeof Office !== "undefined" &&
+        Office.context &&
+        Office.context.mailbox &&
+        typeof Office.context.mailbox.makeEwsRequestAsync === "function"
       );
     } catch {
       return false;
+    }
+  }
+
+  private isOfficeContextAvailable(): boolean {
+    try {
+      return (
+        typeof Office !== "undefined" &&
+        !!Office.context &&
+        !!Office.context.mailbox &&
+        !!Office.context.mailbox.userProfile
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private getCurrentUserEmail(): string | null {
+    try {
+      if (this.isOfficeContextAvailable()) {
+        return Office.context.mailbox.userProfile.emailAddress;
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 
@@ -1230,6 +1286,12 @@ export class EmailAnalysisService {
     emailCount: number,
     cutoffDate: Date,
   ): Promise<any[]> {
+    if (!this.isEwsAvailable()) {
+      throw new Error(
+        "Office.context.mailbox is not available. This feature requires running in Outlook.",
+      );
+    }
+
     return new Promise((resolve, reject) => {
       Office.context.mailbox.makeEwsRequestAsync(
         this.buildGetSentEmailsRequest(emailCount, cutoffDate),
@@ -1327,6 +1389,12 @@ export class EmailAnalysisService {
   private async getConversationThread(
     emailItemId: string,
   ): Promise<ThreadMessage[]> {
+    if (!this.isEwsAvailable()) {
+      throw new Error(
+        "Office.context.mailbox is not available. This feature requires running in Outlook.",
+      );
+    }
+
     this.logDebug(
       `[DEBUG] 🧵 THREAD RETRIEVAL: Getting conversation thread for email ID: ${emailItemId}`,
     );
@@ -1422,8 +1490,14 @@ export class EmailAnalysisService {
       `[DEBUG] Parsing EWS GetItem response to extract email details`,
     );
 
-    const currentUserEmail =
-      Office.context.mailbox.userProfile.emailAddress.toLowerCase();
+    const currentUserEmailRaw = this.getCurrentUserEmail();
+    if (!currentUserEmailRaw) {
+      console.warn(
+        "Cannot parse conversation: Office.context.mailbox.userProfile not available",
+      );
+      return [];
+    }
+    const currentUserEmail = currentUserEmailRaw.toLowerCase();
 
     // Validate the XML response first
     const validation = this.xmlParsingService.validateEwsResponse(xmlResponse);
@@ -2125,6 +2199,13 @@ export class EmailAnalysisService {
     conversationId: string,
     folderId: string,
   ): Promise<ThreadMessage[]> {
+    if (!this.isEwsAvailable()) {
+      console.warn(
+        "Office.context.mailbox is not available. Cannot search conversation in folder.",
+      );
+      return [];
+    }
+
     return new Promise((resolve) => {
       Office.context.mailbox.makeEwsRequestAsync(
         this.buildSearchConversationRequest(
@@ -2204,8 +2285,14 @@ export class EmailAnalysisService {
   private parseSearchConversationResponse(
     xmlResponse: string,
   ): ThreadMessage[] {
-    const currentUserEmail =
-      Office.context.mailbox.userProfile.emailAddress.toLowerCase();
+    const currentUserEmailRaw = this.getCurrentUserEmail();
+    if (!currentUserEmailRaw) {
+      console.warn(
+        "Cannot parse search conversation: Office.context.mailbox.userProfile not available",
+      );
+      return [];
+    }
+    const currentUserEmail = currentUserEmailRaw.toLowerCase();
     const threadMessages: ThreadMessage[] = [];
 
     try {

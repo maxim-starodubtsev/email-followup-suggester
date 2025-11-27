@@ -76,7 +76,10 @@ export class ConfigurationService {
               resolve(this.DEFAULT_CONFIG);
             }
           } catch (error) {
-            console.warn("Error loading configuration from Office settings:", error);
+            console.warn(
+              "Error loading configuration from Office settings:",
+              error,
+            );
             // Fall through to localStorage fallback
             resolve(this.getConfigurationFromLocalStorage());
           }
@@ -143,16 +146,25 @@ export class ConfigurationService {
                   );
                   resolve();
                 } catch (localStorageError) {
-                  console.error("Error saving to localStorage:", localStorageError);
+                  console.error(
+                    "Error saving to localStorage:",
+                    localStorageError,
+                  );
                   reject(new Error("Failed to save configuration"));
                 }
               }
             });
           } catch (error) {
-            console.warn("Error saving to Office settings, using localStorage:", error);
+            console.warn(
+              "Error saving to Office settings, using localStorage:",
+              error,
+            );
             // Fallback to localStorage
             try {
-              localStorage.setItem(this.STORAGE_KEY, JSON.stringify(configToSave));
+              localStorage.setItem(
+                this.STORAGE_KEY,
+                JSON.stringify(configToSave),
+              );
               resolve();
             } catch (localStorageError) {
               console.error("Error saving to localStorage:", localStorageError);
@@ -232,7 +244,9 @@ export class ConfigurationService {
         });
       } else {
         // Office.context not available, return empty array
-        console.warn("Office.context.mailbox not available, returning empty accounts list");
+        console.warn(
+          "Office.context.mailbox not available, returning empty accounts list",
+        );
         return [];
       }
     } catch (error) {
@@ -377,7 +391,10 @@ export class ConfigurationService {
         // Store the cache key using Office settings
         return new Promise((resolve, reject) => {
           try {
-            Office.context.roamingSettings.set("last_analysis_cache_key", cacheKey);
+            Office.context.roamingSettings.set(
+              "last_analysis_cache_key",
+              cacheKey,
+            );
             Office.context.roamingSettings.saveAsync((result) => {
               if (result.status === Office.AsyncResultStatus.Succeeded) {
                 resolve();
@@ -392,7 +409,10 @@ export class ConfigurationService {
               }
             });
           } catch (error) {
-            console.warn("Error saving to Office settings, using localStorage:", error);
+            console.warn(
+              "Error saving to Office settings, using localStorage:",
+              error,
+            );
             // Fallback to localStorage
             try {
               localStorage.setItem("last_analysis_cache_key", cacheKey);
@@ -438,7 +458,10 @@ export class ConfigurationService {
             }
           }
         } catch (error) {
-          console.warn("Error reading from Office settings, trying localStorage:", error);
+          console.warn(
+            "Error reading from Office settings, trying localStorage:",
+            error,
+          );
         }
       }
 

@@ -1802,14 +1802,16 @@ export class TaskpaneManager {
 
     const button = document.getElementById("testAccountDetection");
     const originalButtonText = button?.textContent || "Test Account Detection";
-    
+
     try {
       // Clear previous results and show initial status
       output.innerHTML = "<strong>🔍 Testing Account Detection...</strong><br>";
       output.innerHTML += "⏳ This may take a few seconds, please wait...<br>";
-      output.innerHTML += "<div id='accountDetectionSpinner' style='display: inline-block; margin-left: 10px; color: #0078d4;'>";
-      output.innerHTML += "<span class='spinner'>⟳</span> <span id='spinnerText'>Checking Office context...</span></div><br><br>";
-      
+      output.innerHTML +=
+        "<div id='accountDetectionSpinner' style='display: inline-block; margin-left: 10px; color: #0078d4;'>";
+      output.innerHTML +=
+        "<span class='spinner'>⟳</span> <span id='spinnerText'>Checking Office context...</span></div><br><br>";
+
       // Disable button and show loading state
       if (button) {
         (button as HTMLButtonElement).disabled = true;
@@ -1818,10 +1820,13 @@ export class TaskpaneManager {
 
       // Check if Office.context is available
       if (!Office.context || !Office.context.mailbox) {
-        output.innerHTML = "<strong>🔍 Testing Account Detection...</strong><br>";
+        output.innerHTML =
+          "<strong>🔍 Testing Account Detection...</strong><br>";
         output.innerHTML += "❌ Office.context.mailbox is not available<br>";
-        output.innerHTML += "ℹ️ This is expected when testing in a browser. The add-in needs to run inside Outlook.<br>";
-        output.innerHTML += "<br><strong>Account Detection Test Complete</strong><br><br>";
+        output.innerHTML +=
+          "ℹ️ This is expected when testing in a browser. The add-in needs to run inside Outlook.<br>";
+        output.innerHTML +=
+          "<br><strong>Account Detection Test Complete</strong><br><br>";
         if (button) {
           (button as HTMLButtonElement).disabled = false;
           (button as HTMLButtonElement).textContent = originalButtonText;
@@ -1831,13 +1836,18 @@ export class TaskpaneManager {
 
       // Update spinner text
       const spinnerText = document.getElementById("spinnerText");
-      if (spinnerText) spinnerText.textContent = "Getting user identity token...";
+      if (spinnerText)
+        spinnerText.textContent = "Getting user identity token...";
 
       // Try to get available accounts using our service with timeout
       try {
-        const accountsPromise = this.configurationService.getAvailableAccounts();
+        const accountsPromise =
+          this.configurationService.getAvailableAccounts();
         const timeoutPromise = new Promise<string[]>((_, reject) => {
-          setTimeout(() => reject(new Error("Request timed out after 10 seconds")), 10000);
+          setTimeout(
+            () => reject(new Error("Request timed out after 10 seconds")),
+            10000,
+          );
         });
 
         const accounts = await Promise.race([accountsPromise, timeoutPromise]);
@@ -1846,25 +1856,32 @@ export class TaskpaneManager {
         if (spinnerText) spinnerText.textContent = "Processing results...";
 
         if (accounts.length > 0) {
-          output.innerHTML = "<strong>🔍 Testing Account Detection...</strong><br>";
+          output.innerHTML =
+            "<strong>🔍 Testing Account Detection...</strong><br>";
           output.innerHTML += `✅ Found ${accounts.length} account(s):<br>`;
           accounts.forEach((account) => {
             output.innerHTML += `&nbsp;&nbsp;• ${account}<br>`;
           });
         } else {
-          output.innerHTML = "<strong>🔍 Testing Account Detection...</strong><br>";
+          output.innerHTML =
+            "<strong>🔍 Testing Account Detection...</strong><br>";
           output.innerHTML += "⚠️ No accounts detected<br>";
-          output.innerHTML += "ℹ️ This might be normal if Office.context is not fully initialized.<br>";
+          output.innerHTML +=
+            "ℹ️ This might be normal if Office.context is not fully initialized.<br>";
         }
       } catch (error) {
-        output.innerHTML = "<strong>🔍 Testing Account Detection...</strong><br>";
+        output.innerHTML =
+          "<strong>🔍 Testing Account Detection...</strong><br>";
         const errorMsg = (error as Error).message;
         if (errorMsg.includes("timed out")) {
           output.innerHTML += `⏱️ ${errorMsg}<br>`;
-          output.innerHTML += "ℹ️ The request is taking longer than expected. This might indicate:<br>";
+          output.innerHTML +=
+            "ℹ️ The request is taking longer than expected. This might indicate:<br>";
           output.innerHTML += "&nbsp;&nbsp;• Network connectivity issues<br>";
-          output.innerHTML += "&nbsp;&nbsp;• Office.js is not fully initialized<br>";
-          output.innerHTML += "&nbsp;&nbsp;• Running outside of Outlook context<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;• Office.js is not fully initialized<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;• Running outside of Outlook context<br>";
         } else {
           output.innerHTML += `❌ Account detection error: ${errorMsg}<br>`;
         }
@@ -1876,10 +1893,11 @@ export class TaskpaneManager {
 
       // Test EWS availability (this is often the issue on macOS)
       output.innerHTML += "<br>📡 Testing EWS (Exchange Web Services)...<br>";
-      
+
       if (Office.context.mailbox.makeEwsRequestAsync) {
         output.innerHTML += "✅ EWS API is available<br>";
-        output.innerHTML += "⏳ Testing EWS connection (this may take a few seconds)...<br>";
+        output.innerHTML +=
+          "⏳ Testing EWS connection (this may take a few seconds)...<br>";
 
         // Test a simple EWS request with timeout
         try {
@@ -1928,7 +1946,8 @@ export class TaskpaneManager {
           const errorMsg = (ewsError as Error).message;
           if (errorMsg.includes("timed out")) {
             output.innerHTML += `⏱️ ${errorMsg}<br>`;
-            output.innerHTML += "ℹ️ EWS requests can take time. This might be normal.<br>";
+            output.innerHTML +=
+              "ℹ️ EWS requests can take time. This might be normal.<br>";
           } else {
             output.innerHTML += `❌ EWS test request failed: ${errorMsg}<br>`;
           }
@@ -2186,8 +2205,11 @@ let initialized = false;
 
 function initializeTaskpane() {
   if (initialized) return;
-  
-  if (typeof document !== "undefined" && document.getElementById("analyzeButton")) {
+
+  if (
+    typeof document !== "undefined" &&
+    document.getElementById("analyzeButton")
+  ) {
     try {
       initialized = true;
       console.log("[Followup Suggester] Initializing task pane...");
@@ -2208,7 +2230,9 @@ if (typeof Office !== "undefined" && typeof Office.onReady === "function") {
         initializeTaskpane();
       } else {
         // Office.js loaded but not in Outlook - initialize anyway for development
-        console.log("[Followup Suggester] Office.js loaded but not in Outlook host, initializing anyway for development");
+        console.log(
+          "[Followup Suggester] Office.js loaded but not in Outlook host, initializing anyway for development",
+        );
         initializeTaskpane();
       }
     } catch (e) {
