@@ -36,7 +36,8 @@ webpackProcess.stdout.on('data', (data) => {
   process.stdout.write(output);
   
   // Check if webpack is ready
-  if (output.includes('webpack compiled') || output.includes('localhost:3000')) {
+  const port = process.env.PORT || 3000;
+  if (output.includes('webpack compiled') || output.includes(`localhost:${port}`)) {
     if (!webpackReady) {
       webpackReady = true;
       attemptSideload();
@@ -81,10 +82,11 @@ function attemptSideload() {
 }
 
 function showManualInstructions() {
+  const port = process.env.PORT || 3000;
   console.log('\n' + '='.repeat(70));
   console.log('📋 MANUAL SIDELOADING INSTRUCTIONS');
   console.log('='.repeat(70));
-  console.log('\nThe dev server is running at: https://localhost:3000');
+  console.log(`\nThe dev server is running at: https://localhost:${port}`);
   console.log('\nTo manually load the add-in in Outlook:');
   console.log('\n1. Open Microsoft Outlook');
   console.log('2. Go to: Home → Get Add-ins → My Add-ins');
