@@ -1729,25 +1729,61 @@ export class TaskpaneManager {
       }
       output.innerHTML += "✅ Office.js is available<br>";
 
+      // Test Office.context availability
+      if (!Office.context) {
+        output.innerHTML += "❌ Office.context is not available<br>";
+        output.innerHTML +=
+          "<br><strong>Office Context Test Complete</strong><br><br>";
+        return;
+      }
+      output.innerHTML += "✅ Office.context is available<br>";
+
       // Test host type
-      if (Office.context && Office.context.host) {
+      if (Office.context.host) {
         output.innerHTML += `✅ Host: ${Office.context.host}<br>`;
       } else {
-        output.innerHTML += "❌ Office.context.host not available<br>";
+        output.innerHTML += "⚠️ Office.context.host not available<br>";
       }
 
       // Test platform
-      if (Office.context && Office.context.platform) {
+      if (Office.context.platform) {
         output.innerHTML += `✅ Platform: ${Office.context.platform}<br>`;
       } else {
-        output.innerHTML += "❌ Office.context.platform not available<br>";
+        output.innerHTML += "⚠️ Office.context.platform not available<br>";
       }
 
       // Test mailbox availability
-      if (Office.context && Office.context.mailbox) {
+      if (Office.context.mailbox) {
         output.innerHTML += "✅ Mailbox context available<br>";
       } else {
         output.innerHTML += "❌ Mailbox context not available<br>";
+      }
+
+      // Test roaming settings availability
+      if (Office.context.roamingSettings) {
+        output.innerHTML += "✅ Roaming settings available<br>";
+      } else {
+        output.innerHTML += "⚠️ Roaming settings not available<br>";
+      }
+
+      // Test content language
+      if (Office.context.contentLanguage) {
+        output.innerHTML += `✅ Content language: ${Office.context.contentLanguage}<br>`;
+      }
+
+      // Test display language
+      if (Office.context.displayLanguage) {
+        output.innerHTML += `✅ Display language: ${Office.context.displayLanguage}<br>`;
+      }
+
+      // Test mailbox item type if available
+      if (
+        Office.context.mailbox &&
+        Office.context.mailbox.item &&
+        Office.context.mailbox.item.itemType
+      ) {
+        const itemType = Office.context.mailbox.item.itemType;
+        output.innerHTML += `✅ Current item type: ${itemType}<br>`;
       }
 
       output.innerHTML +=
@@ -1772,9 +1808,9 @@ export class TaskpaneManager {
       // Test user profile
       if (Office.context.mailbox.userProfile) {
         const profile = Office.context.mailbox.userProfile;
-        output.innerHTML += `✅ User email: ${profile.emailAddress}<br>`;
-        output.innerHTML += `✅ Display name: ${profile.displayName}<br>`;
-        output.innerHTML += `✅ Time zone: ${profile.timeZone}<br>`;
+        output.innerHTML += `✅ User email: ${profile.emailAddress || "N/A"}<br>`;
+        output.innerHTML += `✅ Display name: ${profile.displayName || "N/A"}<br>`;
+        output.innerHTML += `✅ Time zone: ${profile.timeZone || "N/A"}<br>`;
       } else {
         output.innerHTML += "❌ User profile not available<br>";
       }
@@ -1782,9 +1818,15 @@ export class TaskpaneManager {
       // Test diagnostics
       if (Office.context.mailbox.diagnostics) {
         const diag = Office.context.mailbox.diagnostics;
-        output.innerHTML += `✅ Host name: ${diag.hostName}<br>`;
-        output.innerHTML += `✅ Host version: ${diag.hostVersion}<br>`;
-        output.innerHTML += `✅ OWA view: ${diag.OWAView}<br>`;
+        output.innerHTML += `✅ Host name: ${diag.hostName || "N/A"}<br>`;
+        output.innerHTML += `✅ Host version: ${diag.hostVersion || "N/A"}<br>`;
+        // OWAView is only available in Outlook on the web, not in desktop Outlook
+        const owaView = diag.OWAView
+          ? diag.OWAView
+          : diag.hostName === "Outlook"
+            ? "N/A (Desktop Outlook)"
+            : "N/A";
+        output.innerHTML += `✅ OWA view: ${owaView}<br>`;
       } else {
         output.innerHTML += "❌ Diagnostics not available<br>";
       }
@@ -1841,33 +1883,97 @@ export class TaskpaneManager {
 
       // Try to get available accounts using our service with timeout
       try {
-        const accountsPromise =
-          this.configurationService.getAvailableAccounts();
-        const timeoutPromise = new Promise<string[]>((_, reject) => {
+        // First, try to get user profile info directly
+        let userEmail: string | undefined;
+        let userDisplayName: string | undefined;
+        try {
+          if (Office.context.mailbox.userProfile) {
+            userEmail = Office.context.mailbox.userProfile.emailAddress;
+            userDisplayName = Office.context.mailbox.userProfile.displayName;
+          }
+        } catch (profileError) {
+          console.warn("Error accessing user profile:", profileError);
+        }
+
+        // Try to get identity token with detailed error handling
+        const identityTokenPromise = new Promise<{
+          success: boolean;
+          error?: string;
+          errorCode?: string;
+        }>((resolve) => {
+          try {
+            Office.context.mailbox.getUserIdentityTokenAsync((result) => {
+              if (result.status === Office.AsyncResultStatus.Succeeded) {
+                resolve({ success: true });
+              } else {
+                const error = result.error;
+                resolve({
+                  success: false,
+                  error: error?.message || "Unknown error",
+                  errorCode: (error as any)?.code,
+                });
+              }
+            });
+          } catch (error) {
+            resolve({
+              success: false,
+              error: (error as Error).message,
+            });
+          }
+        });
+
+        const timeoutPromise = new Promise<{
+          success: boolean;
+          error?: string;
+        }>((_, reject) => {
           setTimeout(
             () => reject(new Error("Request timed out after 10 seconds")),
             10000,
           );
         });
 
-        const accounts = await Promise.race([accountsPromise, timeoutPromise]);
+        const identityResult = await Promise.race([
+          identityTokenPromise,
+          timeoutPromise,
+        ]);
 
         // Update spinner text
         if (spinnerText) spinnerText.textContent = "Processing results...";
 
-        if (accounts.length > 0) {
-          output.innerHTML =
-            "<strong>🔍 Testing Account Detection...</strong><br>";
-          output.innerHTML += `✅ Found ${accounts.length} account(s):<br>`;
-          accounts.forEach((account) => {
-            output.innerHTML += `&nbsp;&nbsp;• ${account}<br>`;
-          });
+        // Display results
+        output.innerHTML =
+          "<strong>🔍 Testing Account Detection...</strong><br>";
+
+        if (userEmail) {
+          output.innerHTML += `✅ User Profile Email: ${userEmail}<br>`;
+          if (userDisplayName) {
+            output.innerHTML += `✅ Display Name: ${userDisplayName}<br>`;
+          }
         } else {
-          output.innerHTML =
-            "<strong>🔍 Testing Account Detection...</strong><br>";
-          output.innerHTML += "⚠️ No accounts detected<br>";
+          output.innerHTML += "⚠️ Could not access user profile email<br>";
+        }
+
+        if (identityResult.success) {
           output.innerHTML +=
-            "ℹ️ This might be normal if Office.context is not fully initialized.<br>";
+            "✅ User identity token obtained successfully<br>";
+          if (userEmail) {
+            output.innerHTML += `✅ Account detected: ${userEmail}<br>`;
+          }
+        } else {
+          output.innerHTML += "⚠️ No accounts detected via identity token<br>";
+          if (identityResult.error) {
+            output.innerHTML += `&nbsp;&nbsp;Error: ${identityResult.error}<br>`;
+          }
+          if ("errorCode" in identityResult && identityResult.errorCode) {
+            output.innerHTML += `&nbsp;&nbsp;Error Code: ${identityResult.errorCode}<br>`;
+          }
+          output.innerHTML += "ℹ️ This might be normal if:<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;• Office.context is not fully initialized<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;• Add-in permissions don't include identity token access<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;• Running in a restricted environment<br>";
         }
       } catch (error) {
         output.innerHTML =
@@ -1882,6 +1988,8 @@ export class TaskpaneManager {
             "&nbsp;&nbsp;• Office.js is not fully initialized<br>";
           output.innerHTML +=
             "&nbsp;&nbsp;• Running outside of Outlook context<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;• Exchange server is slow to respond<br>";
         } else {
           output.innerHTML += `❌ Account detection error: ${errorMsg}<br>`;
         }
@@ -1934,8 +2042,121 @@ export class TaskpaneManager {
                   output.innerHTML += "✅ EWS test request successful<br>";
                   resolve();
                 } else {
-                  output.innerHTML += `❌ EWS test failed: ${result.error.message}<br>`;
-                  reject(new Error(result.error.message));
+                  // Extract detailed error information
+                  const error = result.error;
+                  let errorDetails = `❌ EWS test failed: ${error.message || "The operation failed"}<br>`;
+
+                  // Add error code if available
+                  if ((error as any).code) {
+                    errorDetails += `&nbsp;&nbsp;Error Code: ${(error as any).code}<br>`;
+                  }
+
+                  // Add error name if available
+                  if ((error as any).name) {
+                    errorDetails += `&nbsp;&nbsp;Error Name: ${(error as any).name}<br>`;
+                  }
+
+                  // Try to parse response value if available (sometimes EWS returns error details in response)
+                  if (result.value && typeof result.value === "string") {
+                    try {
+                      const parser = new DOMParser();
+                      const xmlDoc = parser.parseFromString(
+                        result.value,
+                        "text/xml",
+                      );
+
+                      // Check for SOAP faults
+                      const soapFault = xmlDoc.getElementsByTagNameNS(
+                        "http://schemas.xmlsoap.org/soap/envelope/",
+                        "Fault",
+                      )[0];
+                      if (soapFault) {
+                        const faultString =
+                          soapFault.querySelector("faultstring")?.textContent ||
+                          soapFault.getElementsByTagName("faultstring")[0]
+                            ?.textContent ||
+                          "Unknown SOAP fault";
+                        const faultCode =
+                          soapFault.querySelector("faultcode")?.textContent ||
+                          soapFault.getElementsByTagName("faultcode")[0]
+                            ?.textContent;
+                        errorDetails += `&nbsp;&nbsp;SOAP Fault: ${faultString}<br>`;
+                        if (faultCode) {
+                          errorDetails += `&nbsp;&nbsp;Fault Code: ${faultCode}<br>`;
+                        }
+                      }
+
+                      // Check for EWS response errors
+                      const responseMessages =
+                        xmlDoc.getElementsByTagNameNS(
+                          "http://schemas.microsoft.com/exchange/services/2006/messages",
+                          "ResponseMessages",
+                        )[0] || xmlDoc.querySelector("ResponseMessages");
+
+                      if (responseMessages) {
+                        const errorResponse =
+                          responseMessages.querySelector(
+                            '[ResponseClass="Error"]',
+                          ) ||
+                          Array.from(
+                            responseMessages.querySelectorAll("*"),
+                          ).find(
+                            (el) =>
+                              el.getAttribute("ResponseClass") === "Error",
+                          );
+                        if (errorResponse) {
+                          const responseCode =
+                            errorResponse.querySelector("ResponseCode")
+                              ?.textContent ||
+                            Array.from(
+                              errorResponse.querySelectorAll("*"),
+                            ).find(
+                              (el) =>
+                                el.tagName === "ResponseCode" ||
+                                el.localName === "ResponseCode",
+                            )?.textContent ||
+                            "Unknown error";
+                          const messageText =
+                            errorResponse.querySelector("MessageText")
+                              ?.textContent ||
+                            Array.from(
+                              errorResponse.querySelectorAll("*"),
+                            ).find(
+                              (el) =>
+                                el.tagName === "MessageText" ||
+                                el.localName === "MessageText",
+                            )?.textContent ||
+                            "";
+                          errorDetails += `&nbsp;&nbsp;EWS Error Code: ${responseCode}<br>`;
+                          if (messageText) {
+                            errorDetails += `&nbsp;&nbsp;EWS Message: ${messageText}<br>`;
+                          }
+                        }
+                      }
+                    } catch (parseError) {
+                      // If parsing fails, just show the raw error message
+                      console.warn(
+                        "Failed to parse EWS error response:",
+                        parseError,
+                      );
+                    }
+                  }
+
+                  output.innerHTML += errorDetails;
+
+                  // Add troubleshooting information
+                  output.innerHTML +=
+                    "<br>ℹ️ <strong>Troubleshooting:</strong><br>";
+                  output.innerHTML +=
+                    "&nbsp;&nbsp;• Verify EWS is enabled on your Exchange server<br>";
+                  output.innerHTML +=
+                    "&nbsp;&nbsp;• Check if you have proper permissions for EWS access<br>";
+                  output.innerHTML +=
+                    "&nbsp;&nbsp;• Ensure you're connected to Exchange (not just IMAP/POP3)<br>";
+                  output.innerHTML +=
+                    "&nbsp;&nbsp;• Some organizations restrict EWS access for security reasons<br>";
+
+                  reject(new Error(error.message || "The operation failed"));
                 }
               },
             );
@@ -1948,7 +2169,12 @@ export class TaskpaneManager {
             output.innerHTML += `⏱️ ${errorMsg}<br>`;
             output.innerHTML +=
               "ℹ️ EWS requests can take time. This might be normal.<br>";
-          } else {
+            output.innerHTML +=
+              "&nbsp;&nbsp;• Check your network connection<br>";
+            output.innerHTML +=
+              "&nbsp;&nbsp;• The Exchange server might be slow to respond<br>";
+          } else if (!errorMsg.includes("EWS test failed")) {
+            // Only show this if we haven't already shown detailed error above
             output.innerHTML += `❌ EWS test request failed: ${errorMsg}<br>`;
           }
         }
