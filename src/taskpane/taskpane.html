@@ -87,6 +87,30 @@
             cursor: not-allowed;
         }
 
+        /* Clear Filters button specific styling */
+        #clearFilters {
+            background-color: #dc3545 !important;
+            color: white !important;
+            border: none !important;
+            padding: 10px 24px !important;
+            border-radius: 6px !important;
+            font-weight: 600 !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease !important;
+            box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3) !important;
+        }
+
+        #clearFilters:hover {
+            background-color: #c82333 !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 8px rgba(220, 53, 69, 0.4) !important;
+        }
+
+        #clearFilters:active {
+            transform: translateY(0) !important;
+            box-shadow: 0 1px 2px rgba(220, 53, 69, 0.3) !important;
+        }
+
         .status {
             padding: 10px;
             border-radius: 4px;
@@ -286,42 +310,149 @@
 
         /* Advanced Filtering */
         .advanced-filters {
-            background: white;
-            padding: 15px;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
             margin-bottom: 20px;
             display: none;
+            border: 1px solid #e0e0e0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .advanced-filters::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #0078d4, #00bcf2, #0078d4);
+            background-size: 200% 100%;
+            animation: shimmer 3s ease-in-out infinite;
+        }
+
+        @keyframes shimmer {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
         }
 
         .advanced-filters.show {
             display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .filter-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .filter-section-header h4 {
+            margin: 0;
+            color: #333;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-section-header h4::before {
+            content: '🔍';
+            font-size: 18px;
         }
 
         .filter-row {
             display: flex;
-            gap: 10px;
-            margin-bottom: 10px;
+            gap: 12px;
+            margin-bottom: 15px;
             align-items: center;
+        }
+
+        .filter-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .filter-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .filter-row select,
         .filter-row input {
             flex: 1;
-            padding: 6px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 12px;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+            background: white;
+            color: #333;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .filter-row select:focus,
+        .filter-row input:focus {
+            outline: none;
+            border-color: #0078d4;
+            box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.1);
+        }
+
+        .filter-row select:hover,
+        .filter-row input:hover {
+            border-color: #0078d4;
+        }
+
+        .filter-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
         }
 
         .toggle-filters {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            padding: 6px 12px;
+            background: #6c757d;
+            color: white;
+            border: 1px solid #5a6268;
+            padding: 8px 16px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 13px;
+            margin-right: 10px;
             margin-bottom: 10px;
+            transition: background-color 0.2s;
+        }
+
+        .toggle-filters:hover {
+            background: #5a6268;
         }
 
         /* Statistics Dashboard */
@@ -499,6 +630,28 @@
             border-radius: 4px;
         }
 
+        /* Spinner Animation */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            animation: spin 1s linear infinite;
+            margin-right: 5px;
+        }
+
+        #accountDetectionSpinner {
+            display: inline-block;
+            margin-left: 10px;
+            color: #0078d4;
+        }
+
+        #accountDetectionSpinner .spinner {
+            display: inline-block;
+        }
+
         /* Responsive Design */
         @media (max-width: 480px) {
             .stats-grid {
@@ -600,32 +753,58 @@
 
     <!-- Advanced Filters -->
     <div id="advancedFilters" class="advanced-filters">
-        <div class="filter-row">
-            <select id="priorityFilter">
-                <option value="">All Priorities</option>
-                <option value="high">High Priority</option>
-                <option value="medium">Medium Priority</option>
-                <option value="low">Low Priority</option>
-            </select>
-            <select id="responseTimeFilter">
-                <option value="">All Response Times</option>
-                <option value="1-3">1-3 days</option>
-                <option value="4-7">4-7 days</option>
-                <option value="8-14">8-14 days</option>
-                <option value="15+">15+ days</option>
-            </select>
+        <div class="filter-section-header">
+            <h4>Advanced Filters</h4>
         </div>
+        
         <div class="filter-row">
-            <input type="text" id="subjectFilter" placeholder="Filter by subject...">
-            <input type="text" id="senderFilter" placeholder="Filter by sender...">
+            <div class="filter-group">
+                <label for="priorityFilter">Priority</label>
+                <select id="priorityFilter">
+                    <option value="">All Priorities</option>
+                    <option value="high">High Priority</option>
+                    <option value="medium">Medium Priority</option>
+                    <option value="low">Low Priority</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="responseTimeFilter">Response Time</label>
+                <select id="responseTimeFilter">
+                    <option value="">All Response Times</option>
+                    <option value="1-3">1-3 days</option>
+                    <option value="4-7">4-7 days</option>
+                    <option value="8-14">8-14 days</option>
+                    <option value="15+">15+ days</option>
+                </select>
+            </div>
         </div>
+        
         <div class="filter-row">
-            <select id="aiSuggestionFilter">
-                <option value="">All Emails</option>
-                <option value="with-ai">With AI Suggestions</option>
-                <option value="without-ai">Without AI</option>
-            </select>
-            <button id="clearFilters" class="action-button">Clear Filters</button>
+            <div class="filter-group">
+                <label for="subjectFilter">Subject</label>
+                <input type="text" id="subjectFilter" placeholder="Search by subject...">
+            </div>
+            <div class="filter-group">
+                <label for="senderFilter">Sender</label>
+                <input type="text" id="senderFilter" placeholder="Search by sender...">
+            </div>
+        </div>
+        
+        <div class="filter-row">
+            <div class="filter-group">
+                <label for="aiSuggestionFilter">AI Suggestions</label>
+                <select id="aiSuggestionFilter">
+                    <option value="">All Emails</option>
+                    <option value="with-ai">With AI Suggestions</option>
+                    <option value="without-ai">Without AI</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="filter-actions">
+            <button id="clearFilters" class="button" style="background-color: #dc3545; color: white; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);">
+                🗑️ Clear All Filters
+            </button>
         </div>
     </div>
 
@@ -772,7 +951,7 @@
             <div class="modal-body" style="max-height: 500px; overflow-y: auto;">
                 <div class="settings-section">
                     <h4>Office Context & Permissions</h4>
-                    <div id="diagnosticOutput" style="font-size: 12px; font-family: monospace; background: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 10px; max-height: 200px; overflow-y: auto;">
+                    <div id="diagnosticOutput" style="font-size: 12px; font-family: monospace; background: #f8f9fa; color: #333; padding: 10px; border-radius: 4px; margin-bottom: 10px; max-height: 200px; overflow-y: auto; line-height: 1.6;">
                         Click a test button to begin diagnostics...
                     </div>
                     <button id="testOfficeContext" class="button" style="font-size: 12px; margin-right: 5px;">Test Office Context</button>

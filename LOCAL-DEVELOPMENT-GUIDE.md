@@ -56,9 +56,11 @@ npm start
 ```
 
 This command:
-- Starts the Office Add-in debugging tool
-- Launches the webpack dev server on HTTPS (port 3000)
-- Automatically opens Outlook with the add-in loaded
+- Starts the webpack dev server on HTTPS (port 3000)
+- Attempts to automatically sideload the add-in in Outlook
+- Provides manual sideloading instructions if auto-sideloading fails
+
+**Note for macOS users**: Due to limitations with `office-addin-debugging` on macOS, the script will attempt auto-sideloading but may fall back to manual instructions. This is normal and expected.
 
 ### Option 2: Using npm run dev (Manual)
 
@@ -66,7 +68,15 @@ This command:
 npm run dev
 ```
 
-This starts only the webpack dev server. You'll need to manually sideload the add-in in Outlook.
+This starts only the webpack dev server. You'll need to manually sideload the add-in in Outlook (see instructions below).
+
+### Option 3: Using npm run start:auto (Legacy)
+
+```bash
+npm run start:auto
+```
+
+This uses the original `office-addin-debugging` command. On macOS, this may fail with "manifest does not support any Office apps" error. Use `npm start` instead.
 
 **Expected Output:**
 ```
