@@ -79,3 +79,9 @@ npm run start:auto
 - The workaround provides a better developer experience than the original tool
 - Manual sideloading is reliable and works consistently across all platforms
 
+
+
+
+
+
+

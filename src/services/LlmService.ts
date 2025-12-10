@@ -113,6 +113,47 @@ Provide a brief analysis of the thread including key points, sentiment, and sugg
     }
   }
 
+  public async analyzeFollowupNeed(
+    emailContent: string,
+    options: LlmOptions = {},
+  ): Promise<{ needsFollowup: boolean; reason: string }> {
+    const prompt = `Analyze the following email text (which is the last email in a thread sent by the user) to determine if it requires a response or follow-up from the recipients.
+
+Email content:
+${emailContent}
+
+Criteria:
+1. DOES NOT NEED FOLLOWUP (Closing Email): The email is a "closing" email or statement. Examples: "Thank you", "Final update", "To sum up", "Just FYI", "No action needed", "Done", "Resolved".
+2. NEEDS FOLLOWUP (Pending Action/Question): The user asked a question or is waiting for input. Examples: "Did you have a chance to look?", "Appreciate response on this matter", "Any feedback?", "Need help to look into my inquiry".
+
+Output Format:
+Return a JSON object with two fields:
+- "needs_followup": boolean (true if it needs followup, false if it's a closing email)
+- "reason": string (brief explanation)
+
+Do not include markdown formatting. Just the JSON string.`;
+
+    try {
+      const response = await this.callLlmApi(prompt, options);
+      let content = response.content.trim();
+      // Clean potential markdown blocks
+      content = content.replace(/^```json/, "").replace(/```$/, "").trim();
+
+      const result = JSON.parse(content);
+      return {
+        needsFollowup: !!result.needs_followup,
+        reason: result.reason || "No reason provided",
+      };
+    } catch (error: any) {
+      console.error("Error analyzing followup need:", error);
+      // Fallback: assume it needs followup if analysis fails
+      return {
+        needsFollowup: true,
+        reason: "Analysis failed, defaulting to followup",
+      };
+    }
+  }
+
   public async analyzeSentiment(
     emailContent: string,
     options: LlmOptions = {},

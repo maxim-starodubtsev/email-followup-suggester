@@ -72,3 +72,9 @@ rm -f "$TEMP_CERT"
 echo ""
 echo "🔍 To verify, open Keychain Access and search for 'webpack-dev-server'"
 
+
+
+
+
+
+

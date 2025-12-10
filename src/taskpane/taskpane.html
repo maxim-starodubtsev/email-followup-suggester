@@ -1,980 +1,1573 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Follow-up Suggester</title>
 
     <!-- Office JavaScript API -->
-    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script
+      type="text/javascript"
+      src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"
+    ></script>
 
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
 
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
 
-        .header h1 {
-            color: #0078d4;
-            margin-bottom: 5px;
-        }
+      .header h1 {
+        color: #0078d4;
+        margin-bottom: 5px;
+      }
 
-        .header p {
-            color: #666;
-            margin: 0;
-        }
+      .header p {
+        color: #666;
+        margin: 0;
+      }
 
-        .controls {
-            background: white;
-            padding: 15px;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
+      .controls {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+      }
 
-        .control-group {
-            margin-bottom: 15px;
-        }
+      .control-group {
+        margin-bottom: 15px;
+      }
 
-        .control-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 600;
-            color: #333;
-        }
+      .control-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+        color: #333;
+      }
 
-        .control-group select,
-        .control-group input {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
+      .control-group select,
+      .control-group input {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+      }
 
-        .control-group input[type="checkbox"] {
-            width: auto;
-            margin-right: 8px;
-        }
+      .control-group input[type="checkbox"] {
+        width: auto;
+        margin-right: 8px;
+      }
 
-        .button {
-            background-color: #0078d4;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-right: 10px;
-            margin-bottom: 10px;
-        }
+      .button {
+        background-color: #0078d4;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-right: 10px;
+        margin-bottom: 10px;
+      }
 
-        .button:hover {
-            background-color: #106ebe;
-        }
+      .button:hover {
+        background-color: #106ebe;
+      }
 
-        .button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
+      .button:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
 
-        /* Clear Filters button specific styling */
-        #clearFilters {
-            background-color: #dc3545 !important;
-            color: white !important;
-            border: none !important;
-            padding: 10px 24px !important;
-            border-radius: 6px !important;
-            font-weight: 600 !important;
-            cursor: pointer !important;
-            transition: all 0.2s ease !important;
-            box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3) !important;
-        }
+      /* Clear Filters button specific styling */
+      #clearFilters {
+        background-color: #dc3545 !important;
+        color: white !important;
+        border: none !important;
+        padding: 10px 24px !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+        cursor: pointer !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3) !important;
+      }
 
-        #clearFilters:hover {
-            background-color: #c82333 !important;
-            transform: translateY(-1px) !important;
-            box-shadow: 0 4px 8px rgba(220, 53, 69, 0.4) !important;
-        }
+      #clearFilters:hover {
+        background-color: #c82333 !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 8px rgba(220, 53, 69, 0.4) !important;
+      }
 
-        #clearFilters:active {
-            transform: translateY(0) !important;
-            box-shadow: 0 1px 2px rgba(220, 53, 69, 0.3) !important;
-        }
+      #clearFilters:active {
+        transform: translateY(0) !important;
+        box-shadow: 0 1px 2px rgba(220, 53, 69, 0.3) !important;
+      }
 
-        .status {
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 15px;
-            display: none;
-        }
+      .status {
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 15px;
+        display: none;
+      }
 
-        .status.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
+      .status.success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
 
-        .status.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
+      .status.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
 
-        .loading-message {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-            display: none;
-        }
+      /* API Status Banner */
+      .api-status-banner {
+        background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+        border: 1px solid #ffc107;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        display: none;
+      }
 
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-            background: white;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
+      .api-status-banner.error {
+        background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+        border-color: #dc3545;
+      }
 
-        .email-list {
-            display: none;
-        }
+      .api-status-banner.success {
+        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+        border-color: #28a745;
+      }
 
-        .email-item {
-            background: white;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 15px;
-            padding: 15px;
-        }
+      .api-status-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
 
-        .email-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 10px;
-        }
+      .api-status-header h3 {
+        margin: 0;
+        font-size: 14px;
+        color: #856404;
+      }
 
-        .priority-badge,
-        .account-badge,
-        .llm-indicator {
-            margin-right: 10px;
-            font-size: 12px;
-        }
+      .api-status-banner.error .api-status-header h3 {
+        color: #721c24;
+      }
 
-        .email-subject {
-            font-weight: 600;
-            font-size: 16px;
-            color: #333;
-            margin-bottom: 5px;
-        }
+      .api-status-toggle {
+        background: transparent;
+        border: none;
+        color: #856404;
+        cursor: pointer;
+        font-size: 12px;
+        text-decoration: underline;
+      }
 
-        .email-recipient,
-        .email-date,
-        .email-days {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 3px;
-        }
+      .api-status-details {
+        font-size: 12px;
+        color: #856404;
+        margin-bottom: 10px;
+      }
 
-        .email-summary {
-            margin: 10px 0;
-            color: #555;
-            line-height: 1.4;
-            font-size: 12pt;
-        }
+      .api-status-banner.error .api-status-details {
+        color: #721c24;
+      }
 
-        /* Ensure nested elements in summary don't exceed 12pt */
-        .email-summary * {
-            font-size: inherit !important;
-        }
+      .api-status-item {
+        display: flex;
+        align-items: center;
+        margin: 5px 0;
+      }
 
-        .llm-suggestion {
-            background: #e3f2fd;
-            padding: 10px;
-            border-radius: 4px;
-            margin: 10px 0;
-            font-size: 14px;
-            border-left: 3px solid #2196f3;
-        }
+      .api-status-item .icon {
+        margin-right: 8px;
+        font-size: 14px;
+      }
 
-        .email-actions {
-            margin-top: 15px;
-        }
+      /* Fallback Mode Section */
+      .fallback-mode-section {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+        overflow: hidden;
+        display: none;
+      }
 
-        .action-button {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            margin-right: 8px;
-            margin-bottom: 5px;
-        }
+      .fallback-mode-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px;
+      }
 
-        .action-button:hover {
-            background: #e2e6ea;
-        }
+      .fallback-mode-header h3 {
+        margin: 0 0 5px 0;
+        font-size: 16px;
+      }
 
-        /* Modal Styles */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
+      .fallback-mode-header p {
+        margin: 0;
+        font-size: 12px;
+        opacity: 0.9;
+      }
 
-        .modal-content {
-            background-color: white;
-            margin: 15% auto;
-            padding: 0;
-            border-radius: 6px;
-            width: 90%;
-            max-width: 500px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
+      .fallback-mode-options {
+        padding: 15px;
+      }
 
-        .modal-header {
-            padding: 15px 20px;
-            border-bottom: 1px solid #dee2e6;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+      .fallback-option {
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
 
-        .modal-header h3 {
-            margin: 0;
-            color: #333;
-        }
+      .fallback-option:hover {
+        border-color: #667eea;
+        background: #f8f9ff;
+      }
 
-        .modal-close {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: #666;
-        }
+      .fallback-option.selected {
+        border-color: #667eea;
+        background: #f0f3ff;
+      }
 
-        .modal-body {
-            padding: 20px;
-        }
+      .fallback-option.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
 
-        .modal-footer {
-            padding: 15px 20px;
-            border-top: 1px solid #dee2e6;
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
+      .fallback-option-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+      }
 
-        .settings-section {
-            margin-bottom: 20px;
-        }
+      .fallback-option-icon {
+        font-size: 24px;
+        margin-right: 12px;
+      }
 
-        .settings-section h4 {
-            margin-bottom: 10px;
-            color: #333;
-        }
+      .fallback-option-title {
+        font-weight: 600;
+        font-size: 14px;
+        color: #333;
+      }
 
-        .ai-status.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
+      .fallback-option-desc {
+        font-size: 12px;
+        color: #666;
+        margin-left: 36px;
+      }
 
-        .ai-status.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
+      .fallback-option-status {
+        font-size: 11px;
+        margin-left: 36px;
+        margin-top: 5px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        display: inline-block;
+      }
 
-        .ai-status.warning {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-        }
+      .fallback-option-status.available {
+        background: #d4edda;
+        color: #155724;
+      }
 
-        /* Advanced Filtering */
-        .advanced-filters {
-            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
-            margin-bottom: 20px;
-            display: none;
-            border: 1px solid #e0e0e0;
-            position: relative;
-            overflow: hidden;
-        }
+      .fallback-option-status.unavailable {
+        background: #f8d7da;
+        color: #721c24;
+      }
 
-        .advanced-filters::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, #0078d4, #00bcf2, #0078d4);
-            background-size: 200% 100%;
-            animation: shimmer 3s ease-in-out infinite;
-        }
+      /* Manual Input Section */
+      .manual-input-section {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        padding: 20px;
+        margin-bottom: 20px;
+        display: none;
+      }
 
-        @keyframes shimmer {
-            0%, 100% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-        }
+      .manual-input-section h4 {
+        margin: 0 0 15px 0;
+        color: #333;
+      }
 
-        .advanced-filters.show {
-            display: block;
-            animation: slideDown 0.3s ease-out;
-        }
+      .manual-input-section textarea {
+        width: 100%;
+        min-height: 150px;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-family: inherit;
+        font-size: 13px;
+        resize: vertical;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
 
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+      .manual-input-section textarea:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
 
-        .filter-section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e0e0e0;
-        }
+      .manual-input-help {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 15px;
+      }
 
-        .filter-section-header h4 {
-            margin: 0;
-            color: #333;
-            font-size: 16px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+      .manual-input-buttons {
+        display: flex;
+        gap: 10px;
+      }
 
-        .filter-section-header h4::before {
-            content: '🔍';
-            font-size: 18px;
+      /* Current Email Section */
+      .current-email-section {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        padding: 20px;
+        margin-bottom: 20px;
+        display: none;
+      }
+
+      .current-email-section h4 {
+        margin: 0 0 10px 0;
+        color: #333;
+      }
+
+      .current-email-info {
+        background: #f8f9fa;
+        border-radius: 6px;
+        padding: 15px;
+        margin-bottom: 15px;
+      }
+
+      .current-email-info p {
+        margin: 5px 0;
+        font-size: 13px;
+      }
+
+      .current-email-info .label {
+        color: #666;
+        font-weight: 500;
+      }
+
+      .current-email-info .value {
+        color: #333;
+      }
+
+      .loading-message {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+        display: none;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .email-list {
+        display: none;
+      }
+
+      .email-item {
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 15px;
+        padding: 15px;
+      }
+
+      .email-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .priority-badge,
+      .account-badge,
+      .llm-indicator {
+        margin-right: 10px;
+        font-size: 12px;
+      }
+
+      .email-subject {
+        font-weight: 600;
+        font-size: 16px;
+        color: #333;
+        margin-bottom: 5px;
+      }
+
+      .email-recipient,
+      .email-date,
+      .email-days {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 3px;
+      }
+
+      .email-summary {
+        margin: 10px 0;
+        color: #555;
+        line-height: 1.4;
+        font-size: 12pt;
+      }
+
+      /* Ensure nested elements in summary don't exceed 12pt */
+      .email-summary * {
+        font-size: inherit !important;
+      }
+
+      .llm-suggestion {
+        background: #e3f2fd;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+        font-size: 14px;
+        border-left: 3px solid #2196f3;
+      }
+
+      .email-actions {
+        margin-top: 15px;
+      }
+
+      .action-button {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        margin-right: 8px;
+        margin-bottom: 5px;
+      }
+
+      .action-button:hover {
+        background: #e2e6ea;
+      }
+
+      /* Modal Styles */
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+      }
+
+      .modal-content {
+        background-color: white;
+        margin: 15% auto;
+        padding: 0;
+        border-radius: 6px;
+        width: 90%;
+        max-width: 500px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      }
+
+      .modal-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid #dee2e6;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .modal-header h3 {
+        margin: 0;
+        color: #333;
+      }
+
+      .modal-close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #666;
+      }
+
+      .modal-body {
+        padding: 20px;
+      }
+
+      .modal-footer {
+        padding: 15px 20px;
+        border-top: 1px solid #dee2e6;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      .settings-section {
+        margin-bottom: 20px;
+      }
+
+      .settings-section h4 {
+        margin-bottom: 10px;
+        color: #333;
+      }
+
+      .ai-status.success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .ai-status.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+      .ai-status.warning {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+      }
+
+      /* Advanced Filtering */
+      .advanced-filters {
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow:
+          0 4px 12px rgba(0, 0, 0, 0.1),
+          0 2px 4px rgba(0, 0, 0, 0.06);
+        margin-bottom: 20px;
+        display: none;
+        border: 1px solid #e0e0e0;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .advanced-filters::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #0078d4, #00bcf2, #0078d4);
+        background-size: 200% 100%;
+        animation: shimmer 3s ease-in-out infinite;
+      }
+
+      @keyframes shimmer {
+        0%,
+        100% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+      }
+
+      .advanced-filters.show {
+        display: block;
+        animation: slideDown 0.3s ease-out;
+      }
+
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .filter-section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #e0e0e0;
+      }
+
+      .filter-section-header h4 {
+        margin: 0;
+        color: #333;
+        font-size: 16px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .filter-section-header h4::before {
+        content: "🔍";
+        font-size: 18px;
+      }
+
+      .filter-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 15px;
+        align-items: center;
+      }
+
+      .filter-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .filter-group {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .filter-group label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .filter-row select,
+      .filter-row input {
+        flex: 1;
+        padding: 10px 12px;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+        font-size: 13px;
+        background: white;
+        color: #333;
+        transition: all 0.2s ease;
+        font-family: inherit;
+      }
+
+      .filter-row select:focus,
+      .filter-row input:focus {
+        outline: none;
+        border-color: #0078d4;
+        box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.1);
+      }
+
+      .filter-row select:hover,
+      .filter-row input:hover {
+        border-color: #0078d4;
+      }
+
+      .filter-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px solid #e0e0e0;
+      }
+
+      .toggle-filters {
+        background: #6c757d;
+        color: white;
+        border: 1px solid #5a6268;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        margin-right: 10px;
+        margin-bottom: 10px;
+        transition: background-color 0.2s;
+      }
+
+      .toggle-filters:hover {
+        background: #5a6268;
+      }
+
+      /* Statistics Dashboard */
+      .stats-dashboard {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+        display: none;
+      }
+
+      .stats-dashboard.show {
+        display: block;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 15px;
+        margin-bottom: 15px;
+      }
+
+      .stat-card {
+        text-align: center;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        border: 1px solid #dee2e6;
+      }
+
+      .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #0078d4;
+        margin-bottom: 5px;
+      }
+
+      .stat-label {
+        font-size: 12px;
+        color: #666;
+      }
+
+      /* Thread View */
+      .thread-modal {
+        display: none;
+        position: fixed;
+        z-index: 1001;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+      }
+
+      .thread-modal-content {
+        background-color: white;
+        margin: 5% auto;
+        padding: 0;
+        border-radius: 6px;
+        width: 95%;
+        max-width: 800px;
+        height: 80%;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .thread-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid #dee2e6;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+      }
+
+      .thread-body {
+        padding: 20px;
+        overflow-y: auto;
+        flex-grow: 1;
+      }
+
+      .thread-message {
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        overflow: hidden;
+      }
+
+      .thread-message-header {
+        background: #f8f9fa;
+        padding: 10px 15px;
+        border-bottom: 1px solid #dee2e6;
+        font-size: 12px;
+        color: #666;
+      }
+
+      .thread-message-body {
+        padding: 15px;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      /* Progressive Loading */
+      .progress-bar {
+        width: 100%;
+        height: 4px;
+        background: #f0f0f0;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 10px;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: #0078d4;
+        border-radius: 2px;
+        transition: width 0.3s ease;
+        width: 0%;
+      }
+
+      .loading-step {
+        text-align: center;
+        padding: 10px;
+        color: #666;
+        font-size: 12px;
+      }
+
+      /* Enhanced Email Cards */
+      .email-item.priority-high {
+        border-left: 4px solid #d13438;
+      }
+
+      .email-item.priority-medium {
+        border-left: 4px solid #ff8c00;
+      }
+
+      .email-item.priority-low {
+        border-left: 4px solid #107c10;
+      }
+
+      .email-metadata {
+        display: flex;
+        gap: 15px;
+        margin: 10px 0;
+        font-size: 12px;
+        color: #666;
+      }
+
+      .metadata-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .confidence-meter {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 12px;
+      }
+
+      .confidence-bar {
+        width: 50px;
+        height: 8px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .confidence-fill {
+        height: 100%;
+        background: linear-gradient(to right, #d13438, #ff8c00, #107c10);
+        border-radius: 4px;
+      }
+
+      /* Spinner Animation */
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .spinner {
+        display: inline-block;
+        animation: spin 1s linear infinite;
+        margin-right: 5px;
+      }
+
+      #accountDetectionSpinner {
+        display: inline-block;
+        margin-left: 10px;
+        color: #0078d4;
+      }
+
+      #accountDetectionSpinner .spinner {
+        display: inline-block;
+      }
+
+      /* Responsive Design */
+      @media (max-width: 480px) {
+        .stats-grid {
+          grid-template-columns: repeat(2, 1fr);
         }
 
         .filter-row {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 15px;
-            align-items: center;
-        }
-
-        .filter-row:last-child {
-            margin-bottom: 0;
-        }
-
-        .filter-group {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .filter-group label {
-            font-size: 11px;
-            font-weight: 600;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .filter-row select,
-        .filter-row input {
-            flex: 1;
-            padding: 10px 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 13px;
-            background: white;
-            color: #333;
-            transition: all 0.2s ease;
-            font-family: inherit;
-        }
-
-        .filter-row select:focus,
-        .filter-row input:focus {
-            outline: none;
-            border-color: #0078d4;
-            box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.1);
-        }
-
-        .filter-row select:hover,
-        .filter-row input:hover {
-            border-color: #0078d4;
-        }
-
-        .filter-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #e0e0e0;
-        }
-
-        .toggle-filters {
-            background: #6c757d;
-            color: white;
-            border: 1px solid #5a6268;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-            margin-right: 10px;
-            margin-bottom: 10px;
-            transition: background-color 0.2s;
-        }
-
-        .toggle-filters:hover {
-            background: #5a6268;
-        }
-
-        /* Statistics Dashboard */
-        .stats-dashboard {
-            background: white;
-            padding: 15px;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            display: none;
-        }
-
-        .stats-dashboard.show {
-            display: block;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-
-        .stat-card {
-            text-align: center;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            border: 1px solid #dee2e6;
-        }
-
-        .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #0078d4;
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: #666;
-        }
-
-        /* Thread View */
-        .thread-modal {
-            display: none;
-            position: fixed;
-            z-index: 1001;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
+          flex-direction: column;
+          gap: 5px;
         }
 
         .thread-modal-content {
-            background-color: white;
-            margin: 5% auto;
-            padding: 0;
-            border-radius: 6px;
-            width: 95%;
-            max-width: 800px;
-            height: 80%;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            display: flex;
-            flex-direction: column;
+          width: 98%;
+          height: 90%;
+          margin: 2% auto;
         }
-
-        .thread-header {
-            padding: 15px 20px;
-            border-bottom: 1px solid #dee2e6;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        .thread-body {
-            padding: 20px;
-            overflow-y: auto;
-            flex-grow: 1;
-        }
-
-        .thread-message {
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            margin-bottom: 15px;
-            overflow: hidden;
-        }
-
-        .thread-message-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #dee2e6;
-            font-size: 12px;
-            color: #666;
-        }
-
-        .thread-message-body {
-            padding: 15px;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        /* Progressive Loading */
-        .progress-bar {
-            width: 100%;
-            height: 4px;
-            background: #f0f0f0;
-            border-radius: 2px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: #0078d4;
-            border-radius: 2px;
-            transition: width 0.3s ease;
-            width: 0%;
-        }
-
-        .loading-step {
-            text-align: center;
-            padding: 10px;
-            color: #666;
-            font-size: 12px;
-        }
-
-        /* Enhanced Email Cards */
-        .email-item.priority-high {
-            border-left: 4px solid #d13438;
-        }
-
-        .email-item.priority-medium {
-            border-left: 4px solid #ff8c00;
-        }
-
-        .email-item.priority-low {
-            border-left: 4px solid #107c10;
-        }
-
-        .email-metadata {
-            display: flex;
-            gap: 15px;
-            margin: 10px 0;
-            font-size: 12px;
-            color: #666;
-        }
-
-        .metadata-item {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .confidence-meter {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 12px;
-        }
-
-        .confidence-bar {
-            width: 50px;
-            height: 8px;
-            background: #f0f0f0;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .confidence-fill {
-            height: 100%;
-            background: linear-gradient(to right, #d13438, #ff8c00, #107c10);
-            border-radius: 4px;
-        }
-
-        /* Spinner Animation */
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            display: inline-block;
-            animation: spin 1s linear infinite;
-            margin-right: 5px;
-        }
-
-        #accountDetectionSpinner {
-            display: inline-block;
-            margin-left: 10px;
-            color: #0078d4;
-        }
-
-        #accountDetectionSpinner .spinner {
-            display: inline-block;
-        }
-
-        /* Responsive Design */
-        @media (max-width: 480px) {
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .filter-row {
-                flex-direction: column;
-                gap: 5px;
-            }
-            
-            .thread-modal-content {
-                width: 98%;
-                height: 90%;
-                margin: 2% auto;
-            }
-        }
+      }
     </style>
-</head>
+  </head>
 
-<body>
+  <body>
     <div class="header">
-        <h1>📧 Follow-up Suggester</h1>
-        <p>AI-powered email follow-up analysis for Outlook</p>
+      <h1>📧 Follow-up Suggester</h1>
+      <p>AI-powered email follow-up analysis for Outlook</p>
     </div>
 
     <div class="status" id="status"></div>
 
+    <!-- API Status Banner -->
+    <div id="apiStatusBanner" class="api-status-banner">
+      <div class="api-status-header">
+        <h3 id="apiStatusTitle">⚠️ Limited Email Access</h3>
+        <button class="api-status-toggle" id="toggleApiDetails">
+          Show Details
+        </button>
+      </div>
+      <div
+        id="apiStatusDetails"
+        class="api-status-details"
+        style="display: none"
+      >
+        <div class="api-status-item">
+          <span class="icon" id="ewsStatusIcon">❌</span>
+          <span id="ewsStatusText"
+            >EWS (Exchange Web Services): Not available</span
+          >
+        </div>
+        <div class="api-status-item">
+          <span class="icon" id="graphStatusIcon">❌</span>
+          <span id="graphStatusText">Microsoft Graph API: Not available</span>
+        </div>
+        <div class="api-status-item">
+          <span class="icon" id="currentEmailStatusIcon">✅</span>
+          <span id="currentEmailStatusText">Current Email: Available</span>
+        </div>
+      </div>
+      <p id="apiStatusMessage" style="font-size: 12px; margin: 0">
+        Your organization's policies may be restricting bulk email access.
+        Alternative modes are available below.
+      </p>
+    </div>
+
+    <!-- Fallback Mode Section -->
+    <div id="fallbackModeSection" class="fallback-mode-section">
+      <div class="fallback-mode-header">
+        <h3>📨 Email Analysis Mode</h3>
+        <p>Choose how you want to analyze emails</p>
+      </div>
+      <div class="fallback-mode-options">
+        <!-- Bulk Analysis Option -->
+        <div class="fallback-option" id="optionBulkAnalysis" data-mode="bulk">
+          <div class="fallback-option-header">
+            <span class="fallback-option-icon">📊</span>
+            <span class="fallback-option-title">Bulk Email Analysis</span>
+          </div>
+          <div class="fallback-option-desc">
+            Analyze multiple sent emails at once to find those needing
+            follow-up.
+          </div>
+          <span
+            class="fallback-option-status unavailable"
+            id="bulkAnalysisStatus"
+          >
+            ❌ Requires EWS or Graph API (blocked by organization)
+          </span>
+        </div>
+
+        <!-- Current Email Option -->
+        <div
+          class="fallback-option"
+          id="optionCurrentEmail"
+          data-mode="current"
+        >
+          <div class="fallback-option-header">
+            <span class="fallback-option-icon">📧</span>
+            <span class="fallback-option-title">Analyze Current Email</span>
+          </div>
+          <div class="fallback-option-desc">
+            Analyze the email you're currently viewing for follow-up needs.
+          </div>
+          <span
+            class="fallback-option-status available"
+            id="currentEmailStatus"
+          >
+            ✅ Available - Works with current email
+          </span>
+        </div>
+
+        <!-- Manual Input Option -->
+        <div class="fallback-option" id="optionManualInput" data-mode="manual">
+          <div class="fallback-option-header">
+            <span class="fallback-option-icon">📝</span>
+            <span class="fallback-option-title">Manual Email Input</span>
+          </div>
+          <div class="fallback-option-desc">
+            Paste email content to analyze manually.
+          </div>
+          <span class="fallback-option-status available" id="manualInputStatus">
+            ✅ Always available
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Current Email Analysis Section -->
+    <div id="currentEmailSection" class="current-email-section">
+      <h4>📧 Analyze Current Email</h4>
+      <div class="current-email-info" id="currentEmailInfo">
+        <p>
+          <span class="label">Subject:</span>
+          <span class="value" id="currentEmailSubject">No email selected</span>
+        </p>
+        <p>
+          <span class="label">From:</span>
+          <span class="value" id="currentEmailFrom">-</span>
+        </p>
+        <p>
+          <span class="label">Date:</span>
+          <span class="value" id="currentEmailDate">-</span>
+        </p>
+        <p>
+          <span class="label">To:</span>
+          <span class="value" id="currentEmailTo">-</span>
+        </p>
+      </div>
+      <button id="analyzeCurrentEmailBtn" class="button" disabled>
+        Analyze This Email
+      </button>
+      <button
+        id="backToModeSelection"
+        class="button"
+        style="background-color: #6c757d"
+      >
+        Back to Options
+      </button>
+    </div>
+
+    <!-- Manual Input Section -->
+    <div id="manualInputSection" class="manual-input-section">
+      <h4>📝 Manual Email Input</h4>
+      <p class="manual-input-help">
+        Paste the email content below. Include the subject, sender, recipient,
+        date, and body for best results.
+      </p>
+      <textarea
+        id="manualEmailInput"
+        placeholder="Subject: Meeting Follow-up
+From: john@example.com
+To: me@company.com
+Date: November 20, 2024
+
+Hi,
+
+I wanted to follow up on our meeting last week about the project timeline...
+
+[Paste full email content here]"
+      ></textarea>
+      <div class="manual-input-buttons">
+        <button id="analyzeManualEmailBtn" class="button">Analyze Email</button>
+        <button
+          id="clearManualInput"
+          class="button"
+          style="background-color: #6c757d"
+        >
+          Clear
+        </button>
+        <button
+          id="backToModeSelectionManual"
+          class="button"
+          style="background-color: #6c757d"
+        >
+          Back to Options
+        </button>
+      </div>
+    </div>
+
     <!-- Statistics Dashboard -->
     <div id="statsDashboard" class="stats-dashboard">
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value" id="totalEmailsAnalyzed">0</div>
-                <div class="stat-label">Emails Analyzed</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="needingFollowup">0</div>
-                <div class="stat-label">Need Follow-up</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="highPriorityCount">0</div>
-                <div class="stat-label">High Priority</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="avgResponseTime">0</div>
-                <div class="stat-label">Avg Days</div>
-            </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="totalEmailsAnalyzed">0</div>
+          <div class="stat-label">Emails Analyzed</div>
         </div>
-        <button id="toggleStats" class="toggle-filters">Hide Statistics</button>
+        <div class="stat-card">
+          <div class="stat-value" id="needingFollowup">0</div>
+          <div class="stat-label">Need Follow-up</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="highPriorityCount">0</div>
+          <div class="stat-label">High Priority</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="avgResponseTime">0</div>
+          <div class="stat-label">Avg Days</div>
+        </div>
+      </div>
+      <button id="toggleStats" class="toggle-filters">Hide Statistics</button>
     </div>
 
     <div class="controls">
-        <div class="control-group">
-            <label for="emailCount">Number of emails to analyze:</label>
-            <select id="emailCount">
-                <option value="10">10</option>
-                <option value="25" selected>25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-            </select>
-        </div>
-        
-        <div class="control-group">
-            <label for="daysBack">Days to look back:</label>
-            <select id="daysBack">
-                <option value="7" selected>7 days</option>
-                <option value="14">14 days</option>
-                <option value="30">30 days</option>
-                <option value="60">60 days</option>
-            </select>
-        </div>
-        
-        <div class="control-group">
-            <label for="accountFilter">Filter by accounts:</label>
-            <select id="accountFilter" multiple>
-                <!-- Account options will be populated dynamically -->
-            </select>
-        </div>
-        
-        <div class="control-group">
-            <label>
-                <input type="checkbox" id="enableLlmSummary"> Use AI for email summaries
-            </label>
-        </div>
-        
-        <div class="control-group">
-            <label>
-                <input type="checkbox" id="enableLlmSuggestions"> Use AI for follow-up suggestions
-            </label>
-        </div>
-        
-        <button id="analyzeButton" class="button">Analyze Emails</button>
-        <button id="refreshButton" class="button">Refresh</button>
-        <button id="settingsButton" class="button" style="background-color: #6c757d;">Settings</button>
-        <button id="diagnosticButton" class="button" style="background-color: #ff8c00;">🔍 Diagnostics</button>
-        <button id="showStatsButton" class="toggle-filters">Show Statistics</button>
-        <button id="toggleAdvancedFilters" class="toggle-filters">Advanced Filters</button>
+      <div class="control-group">
+        <label for="emailCount">Number of emails to analyze:</label>
+        <select id="emailCount">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="daysBack">Days to look back:</label>
+        <select id="daysBack">
+          <option value="7" selected>7 days</option>
+          <option value="14">14 days</option>
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="accountFilter">Filter by accounts:</label>
+        <select id="accountFilter" multiple>
+          <!-- Account options will be populated dynamically -->
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>
+          <input type="checkbox" id="enableLlmSummary" /> Use AI for email
+          summaries
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          <input type="checkbox" id="enableLlmSuggestions" /> Use AI for
+          follow-up suggestions
+        </label>
+      </div>
+
+      <button id="analyzeButton" class="button">Analyze Emails</button>
+      <button id="refreshButton" class="button">Refresh</button>
+      <button
+        id="settingsButton"
+        class="button"
+        style="background-color: #6c757d"
+      >
+        Settings
+      </button>
+      <button
+        id="diagnosticButton"
+        class="button"
+        style="background-color: #ff8c00"
+      >
+        🔍 Diagnostics
+      </button>
+      <button id="showStatsButton" class="toggle-filters">
+        Show Statistics
+      </button>
+      <button id="toggleAdvancedFilters" class="toggle-filters">
+        Advanced Filters
+      </button>
     </div>
 
     <!-- Advanced Filters -->
     <div id="advancedFilters" class="advanced-filters">
-        <div class="filter-section-header">
-            <h4>Advanced Filters</h4>
+      <div class="filter-section-header">
+        <h4>Advanced Filters</h4>
+      </div>
+
+      <div class="filter-row">
+        <div class="filter-group">
+          <label for="priorityFilter">Priority</label>
+          <select id="priorityFilter">
+            <option value="">All Priorities</option>
+            <option value="high">High Priority</option>
+            <option value="medium">Medium Priority</option>
+            <option value="low">Low Priority</option>
+          </select>
         </div>
-        
-        <div class="filter-row">
-            <div class="filter-group">
-                <label for="priorityFilter">Priority</label>
-                <select id="priorityFilter">
-                    <option value="">All Priorities</option>
-                    <option value="high">High Priority</option>
-                    <option value="medium">Medium Priority</option>
-                    <option value="low">Low Priority</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label for="responseTimeFilter">Response Time</label>
-                <select id="responseTimeFilter">
-                    <option value="">All Response Times</option>
-                    <option value="1-3">1-3 days</option>
-                    <option value="4-7">4-7 days</option>
-                    <option value="8-14">8-14 days</option>
-                    <option value="15+">15+ days</option>
-                </select>
-            </div>
+        <div class="filter-group">
+          <label for="responseTimeFilter">Response Time</label>
+          <select id="responseTimeFilter">
+            <option value="">All Response Times</option>
+            <option value="1-3">1-3 days</option>
+            <option value="4-7">4-7 days</option>
+            <option value="8-14">8-14 days</option>
+            <option value="15+">15+ days</option>
+          </select>
         </div>
-        
-        <div class="filter-row">
-            <div class="filter-group">
-                <label for="subjectFilter">Subject</label>
-                <input type="text" id="subjectFilter" placeholder="Search by subject...">
-            </div>
-            <div class="filter-group">
-                <label for="senderFilter">Sender</label>
-                <input type="text" id="senderFilter" placeholder="Search by sender...">
-            </div>
+      </div>
+
+      <div class="filter-row">
+        <div class="filter-group">
+          <label for="subjectFilter">Subject</label>
+          <input
+            type="text"
+            id="subjectFilter"
+            placeholder="Search by subject..."
+          />
         </div>
-        
-        <div class="filter-row">
-            <div class="filter-group">
-                <label for="aiSuggestionFilter">AI Suggestions</label>
-                <select id="aiSuggestionFilter">
-                    <option value="">All Emails</option>
-                    <option value="with-ai">With AI Suggestions</option>
-                    <option value="without-ai">Without AI</option>
-                </select>
-            </div>
+        <div class="filter-group">
+          <label for="senderFilter">Sender</label>
+          <input
+            type="text"
+            id="senderFilter"
+            placeholder="Search by sender..."
+          />
         </div>
-        
-        <div class="filter-actions">
-            <button id="clearFilters" class="button" style="background-color: #dc3545; color: white; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);">
-                🗑️ Clear All Filters
-            </button>
+      </div>
+
+      <div class="filter-row">
+        <div class="filter-group">
+          <label for="aiSuggestionFilter">AI Suggestions</label>
+          <select id="aiSuggestionFilter">
+            <option value="">All Emails</option>
+            <option value="with-ai">With AI Suggestions</option>
+            <option value="without-ai">Without AI</option>
+          </select>
         </div>
+      </div>
+
+      <div class="filter-actions">
+        <button
+          id="clearFilters"
+          class="button"
+          style="
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);
+          "
+        >
+          🗑️ Clear All Filters
+        </button>
+      </div>
     </div>
 
     <!-- Progressive Loading -->
     <div class="loading-message" id="loadingMessage">
-        <div>🔄 <span id="loadingStep">Analyzing your emails...</span></div>
-        <div class="progress-bar">
-            <div class="progress-fill" id="progressFill"></div>
-        </div>
-        <div class="loading-step" id="loadingDetail">This may take a few moments</div>
+      <div>🔄 <span id="loadingStep">Analyzing your emails...</span></div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="loading-step" id="loadingDetail">
+        This may take a few moments
+      </div>
     </div>
 
     <div class="empty-state" id="emptyState">
-        <h3>Ready to analyze your emails!</h3>
-        <p>Click "Analyze Emails" to find messages that might need follow-up.</p>
+      <h3>Ready to analyze your emails!</h3>
+      <p>Click "Analyze Emails" to find messages that might need follow-up.</p>
     </div>
 
-    <div id="emailList" class="email-list" style="display: none;">
-        <!-- Enhanced email items will be populated here -->
+    <div id="emailList" class="email-list" style="display: none">
+      <!-- Enhanced email items will be populated here -->
     </div>
 
     <!-- Snooze Modal -->
-    <div id="snoozeModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Snooze Email</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="control-group">
-                    <label for="snoozeOptions">Snooze until:</label>
-                    <select id="snoozeOptions">
-                        <!-- Options will be populated from configuration -->
-                    </select>
-                </div>
-                <div class="control-group" id="customSnoozeGroup" style="display: none;">
-                    <label for="customSnoozeDate">Custom date and time:</label>
-                    <input type="datetime-local" id="customSnoozeDate">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="confirmSnooze" class="button">Snooze</button>
-                <button id="cancelSnooze" class="button" style="background-color: #6c757d;">Cancel</button>
-            </div>
+    <div id="snoozeModal" class="modal" style="display: none">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Snooze Email</h3>
+          <button class="modal-close">&times;</button>
         </div>
+        <div class="modal-body">
+          <div class="control-group">
+            <label for="snoozeOptions">Snooze until:</label>
+            <select id="snoozeOptions">
+              <!-- Options will be populated from configuration -->
+            </select>
+          </div>
+          <div
+            class="control-group"
+            id="customSnoozeGroup"
+            style="display: none"
+          >
+            <label for="customSnoozeDate">Custom date and time:</label>
+            <input type="datetime-local" id="customSnoozeDate" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="confirmSnooze" class="button">Snooze</button>
+          <button
+            id="cancelSnooze"
+            class="button"
+            style="background-color: #6c757d"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
-    
+
     <!-- Settings Modal -->
-    <div id="settingsModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Settings</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="settings-section">
-                    <h4>AI Integration</h4>
-                    <div class="ai-status" id="aiStatus" style="padding: 8px; border-radius: 4px; margin-bottom: 10px; display: none;">
-                        <span id="aiStatusText">Checking AI service...</span>
-                    </div>
-                    <div class="control-group">
-                        <label for="llmEndpoint">LLM API Endpoint:</label>
-                        <input type="text" id="llmEndpoint" placeholder="https://ai-proxy.lab.epam.com" value="https://ai-proxy.lab.epam.com">
-                    </div>
-                    <div class="control-group">
-                        <label for="llmApiKey">API Key:</label>
-                        <input type="password" id="llmApiKey" placeholder="Enter your API key" value="dial-qjboupii21tb26eakd3ytcsb9po">
-                    </div>
-                    <div class="control-group">
-                        <label for="llmProvider">API Provider:</label>
-                        <select id="llmProvider">
-                            <option value="">Auto-detect</option>
-                            <option value="dial">DIAL API (EPAM)</option>
-                            <option value="azure">Azure OpenAI</option>
-                            <option value="openai">OpenAI</option>
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label for="llmModel">Model Name:</label>
-                        <input type="text" id="llmModel" placeholder="gpt-35-turbo" value="gpt-35-turbo">
-                    </div>
-                    <div id="azureSpecificOptions" style="display: none;">
-                        <div class="control-group">
-                            <label for="llmDeploymentName">Deployment Name (Azure):</label>
-                            <input type="text" id="llmDeploymentName" placeholder="my-gpt-35-turbo-deployment">
-                        </div>
-                        <div class="control-group">
-                            <label for="llmApiVersion">API Version (Azure):</label>
-                            <input type="text" id="llmApiVersion" placeholder="2023-12-01-preview" value="2023-12-01-preview">
-                        </div>
-                    </div>
-                    <div class="control-group">
-                        <button id="testAiConnection" class="button" style="background-color: #28a745;">Test AI Connection</button>
-                        <button id="disableAiFeatures" class="button" style="background-color: #dc3545;">Disable AI Features</button>
-                    </div>
-                </div>
-                
-                <div class="settings-section">
-                    <h4>Display Options</h4>
-                    <div class="control-group">
-                        <label>
-                            <input type="checkbox" id="enableAiFeatures" checked> Enable AI Features (summaries and suggestions)
-                        </label>
-                    </div>
-                    <div class="control-group">
-                        <label>
-                            <input type="checkbox" id="showSnoozedEmails"> Show snoozed emails
-                        </label>
-                    </div>
-                    <div class="control-group">
-                        <label>
-                            <input type="checkbox" id="showDismissedEmails"> Show dismissed emails
-                        </label>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="saveSettings" class="button">Save Settings</button>
-                <button id="cancelSettings" class="button" style="background-color: #6c757d;">Cancel</button>
-            </div>
+    <div id="settingsModal" class="modal" style="display: none">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Settings</h3>
+          <button class="modal-close">&times;</button>
         </div>
+        <div class="modal-body">
+          <div class="settings-section">
+            <h4>AI Integration</h4>
+            <div
+              class="ai-status"
+              id="aiStatus"
+              style="
+                padding: 8px;
+                border-radius: 4px;
+                margin-bottom: 10px;
+                display: none;
+              "
+            >
+              <span id="aiStatusText">Checking AI service...</span>
+            </div>
+            <div class="control-group">
+              <label for="llmEndpoint">LLM API Endpoint:</label>
+              <input
+                type="text"
+                id="llmEndpoint"
+                placeholder="https://ai-proxy.lab.epam.com"
+                value="https://ai-proxy.lab.epam.com"
+              />
+            </div>
+            <div class="control-group">
+              <label for="llmApiKey">API Key:</label>
+              <input
+                type="password"
+                id="llmApiKey"
+                placeholder="Enter your API key"
+                value="dial-qjboupii21tb26eakd3ytcsb9po"
+              />
+            </div>
+            <div class="control-group">
+              <label for="llmProvider">API Provider:</label>
+              <select id="llmProvider">
+                <option value="">Auto-detect</option>
+                <option value="dial">DIAL API (EPAM)</option>
+                <option value="azure">Azure OpenAI</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label for="llmModel">Model Name:</label>
+              <input
+                type="text"
+                id="llmModel"
+                placeholder="gpt-35-turbo"
+                value="gpt-35-turbo"
+              />
+            </div>
+            <div id="azureSpecificOptions" style="display: none">
+              <div class="control-group">
+                <label for="llmDeploymentName">Deployment Name (Azure):</label>
+                <input
+                  type="text"
+                  id="llmDeploymentName"
+                  placeholder="my-gpt-35-turbo-deployment"
+                />
+              </div>
+              <div class="control-group">
+                <label for="llmApiVersion">API Version (Azure):</label>
+                <input
+                  type="text"
+                  id="llmApiVersion"
+                  placeholder="2023-12-01-preview"
+                  value="2023-12-01-preview"
+                />
+              </div>
+            </div>
+            <div class="control-group">
+              <button
+                id="testAiConnection"
+                class="button"
+                style="background-color: #28a745"
+              >
+                Test AI Connection
+              </button>
+              <button
+                id="disableAiFeatures"
+                class="button"
+                style="background-color: #dc3545"
+              >
+                Disable AI Features
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h4>Display Options</h4>
+            <div class="control-group">
+              <label>
+                <input type="checkbox" id="enableAiFeatures" checked /> Enable
+                AI Features (summaries and suggestions)
+              </label>
+            </div>
+            <div class="control-group">
+              <label>
+                <input type="checkbox" id="showSnoozedEmails" /> Show snoozed
+                emails
+              </label>
+            </div>
+            <div class="control-group">
+              <label>
+                <input type="checkbox" id="showDismissedEmails" /> Show
+                dismissed emails
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveSettings" class="button">Save Settings</button>
+          <button
+            id="cancelSettings"
+            class="button"
+            style="background-color: #6c757d"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Thread View Modal -->
     <div id="threadModal" class="thread-modal">
-        <div class="thread-modal-content">
-            <div class="thread-header">
-                <h3 id="threadSubject">Email Thread</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="thread-body" id="threadBody">
-                <!-- Thread messages will be populated here -->
-            </div>
+      <div class="thread-modal-content">
+        <div class="thread-header">
+          <h3 id="threadSubject">Email Thread</h3>
+          <button class="modal-close">&times;</button>
         </div>
+        <div class="thread-body" id="threadBody">
+          <!-- Thread messages will be populated here -->
+        </div>
+      </div>
     </div>
 
     <!-- Diagnostic Modal -->
-    <div id="diagnosticModal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 700px;">
-            <div class="modal-header">
-                <h3>🔍 Add-in Diagnostics</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body" style="max-height: 500px; overflow-y: auto;">
-                <div class="settings-section">
-                    <h4>Office Context & Permissions</h4>
-                    <div id="diagnosticOutput" style="font-size: 12px; font-family: monospace; background: #f8f9fa; color: #333; padding: 10px; border-radius: 4px; margin-bottom: 10px; max-height: 200px; overflow-y: auto; line-height: 1.6;">
-                        Click a test button to begin diagnostics...
-                    </div>
-                    <button id="testOfficeContext" class="button" style="font-size: 12px; margin-right: 5px;">Test Office Context</button>
-                    <button id="testMailboxAccess" class="button" style="font-size: 12px; margin-right: 5px;">Test Mailbox Access</button>
-                    <button id="testAccountDetection" class="button" style="font-size: 12px; margin-right: 5px;">Test Account Detection</button>
-                    <button id="testEmailReading" class="button" style="font-size: 12px;">Test Email Reading</button>
-                </div>
-                
-                <div class="settings-section">
-                    <h4>Troubleshooting Tips</h4>
-                    <div style="font-size: 12px; color: #666;">
-                        <p><strong>Step 1:</strong> Ensure you have sent emails in your mailbox</p>
-                        <p><strong>Step 2:</strong> Try reading an email first to establish context</p>
-                        <p><strong>Step 3:</strong> Check if EWS is enabled on your Exchange server</p>
-                        <p><strong>Step 4:</strong> Verify add-in permissions are correct</p>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="closeDiagnostic" class="button" style="background-color: #6c757d;">Close</button>
-            </div>
+    <div id="diagnosticModal" class="modal" style="display: none">
+      <div class="modal-content" style="max-width: 700px">
+        <div class="modal-header">
+          <h3>🔍 Add-in Diagnostics</h3>
+          <button class="modal-close">&times;</button>
         </div>
-    </div>
-</body>
+        <div class="modal-body" style="max-height: 500px; overflow-y: auto">
+          <div class="settings-section">
+            <h4>Office Context & Permissions</h4>
+            <div
+              id="diagnosticOutput"
+              style="
+                font-size: 12px;
+                font-family: monospace;
+                background: #f8f9fa;
+                color: #333;
+                padding: 10px;
+                border-radius: 4px;
+                margin-bottom: 10px;
+                max-height: 200px;
+                overflow-y: auto;
+                line-height: 1.6;
+              "
+            >
+              Click a test button to begin diagnostics...
+            </div>
+            <button
+              id="testOfficeContext"
+              class="button"
+              style="font-size: 12px; margin-right: 5px"
+            >
+              Test Office Context
+            </button>
+            <button
+              id="testMailboxAccess"
+              class="button"
+              style="font-size: 12px; margin-right: 5px"
+            >
+              Test Mailbox Access
+            </button>
+            <button
+              id="testAccountDetection"
+              class="button"
+              style="font-size: 12px; margin-right: 5px"
+            >
+              Test Account Detection
+            </button>
+            <button
+              id="testEmailReading"
+              class="button"
+              style="font-size: 12px; margin-right: 5px"
+            >
+              Test Email Reading
+            </button>
+            <button
+              id="testGraphApi"
+              class="button"
+              style="font-size: 12px; background-color: #0078d4"
+            >
+              Test Graph API
+            </button>
+          </div>
 
+          <div class="settings-section">
+            <h4>Troubleshooting Tips</h4>
+            <div style="font-size: 12px; color: #666">
+              <p>
+                <strong>Step 1:</strong> Ensure you have sent emails in your
+                mailbox
+              </p>
+              <p>
+                <strong>Step 2:</strong> Try reading an email first to establish
+                context
+              </p>
+              <p>
+                <strong>Step 3:</strong> Check if EWS is enabled on your
+                Exchange server
+              </p>
+              <p>
+                <strong>Step 4:</strong> Verify add-in permissions are correct
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            id="closeDiagnostic"
+            class="button"
+            style="background-color: #6c757d"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </body>
 </html>

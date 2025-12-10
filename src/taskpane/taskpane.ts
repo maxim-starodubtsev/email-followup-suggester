@@ -456,6 +456,20 @@ export class TaskpaneManager {
   private populateAccountFilter(selectedAccounts: string[]): void {
     this.accountFilterSelect.innerHTML = "";
 
+    // If only one account is available (common in Office.js context), simplify the UI
+    if (this.availableAccounts.length === 1) {
+      const account = this.availableAccounts[0];
+      const option = document.createElement("option");
+      option.value = account;
+      option.textContent = `${account} (Current)`;
+      option.selected = true;
+      this.accountFilterSelect.appendChild(option);
+      // Disable to indicate single-context scope
+      this.accountFilterSelect.disabled = true;
+      return;
+    }
+
+    this.accountFilterSelect.disabled = false;
     this.availableAccounts.forEach((account) => {
       const option = document.createElement("option");
       option.value = account;
@@ -946,107 +960,35 @@ export class TaskpaneManager {
         console.warn("Email not found for reply", _emailId);
         return;
       }
-      // Preferred: create a Reply All draft via EWS and open it using native compose
-      const isTestEnv = typeof (globalThis as any).jest !== "undefined";
-      const hasDisplay =
+
+      // PRIMARY STRATEGY: Open the email item so the user can use the native "Reply All" button.
+      // This ensures thread context is preserved perfectly and works without EWS write permissions.
+      const hasDisplayMessage =
         typeof (Office.context?.mailbox as any)?.displayMessageForm ===
         "function";
-      const hasEws =
-        typeof (Office.context?.mailbox as any)?.makeEwsRequestAsync ===
-        "function";
-      if (!isTestEnv && hasDisplay && hasEws) {
+
+      if (hasDisplayMessage && this.isLikelyEwsItemId(_emailId)) {
         try {
-          const lastMsg =
-            email.threadMessages && email.threadMessages.length > 0
-              ? email.threadMessages[email.threadMessages.length - 1]
-              : undefined;
-          const referenceId = lastMsg?.id || email.id;
-          const referenceChangeKey = lastMsg?.changeKey;
-          if (this.isLikelyEwsItemId(referenceId)) {
-            const draftId = await this.createReplyAllDraft(
-              referenceId,
-              referenceChangeKey,
-            );
-            if (draftId) {
-              Office.context.mailbox.displayMessageForm(draftId);
-              return;
-            }
-          } else {
-            console.warn(
-              "Reference ID does not look like an EWS ItemId. Skipping EWS path and using compose fallback.",
-            );
-          }
+          Office.context.mailbox.displayMessageForm(_emailId);
+          // Optional: Show a toast/status telling the user what to do
+          this.showStatus(
+            "Opened email. Please click 'Reply All' in Outlook to respond.",
+            "success",
+          );
+          return;
         } catch (e) {
-          console.warn(
-            "ReplyAll draft creation failed, falling back to compose builder:",
-            e,
+          console.warn("Failed to display message form:", e);
+          this.showStatus(
+            "Failed to open email. Please find it in your Sent Items to reply.",
+            "error",
           );
         }
-      }
-      // Fallback (e.g., unit tests or non-Outlook host): synthesize a Reply All compose window
-      const lastMessage =
-        email.threadMessages && email.threadMessages.length > 0
-          ? email.threadMessages[email.threadMessages.length - 1]
-          : undefined;
-      if (!lastMessage) {
-        console.warn("No thread messages available for reply", _emailId);
-        return;
-      }
-      const currentUser =
-        Office?.context?.mailbox?.userProfile?.emailAddress?.toLowerCase();
-      const unique = new Set<string>();
-      const toRecipients: string[] = [];
-      const ccRecipients: string[] = [];
-      const addRecipient = (
-        addr: string | undefined | null,
-        list: string[],
-      ) => {
-        if (!addr) return;
-        const norm = addr.trim();
-        if (!norm) return;
-        const lower = norm.toLowerCase();
-        if (currentUser && lower === currentUser) return;
-        if (unique.has(lower)) return;
-        unique.add(lower);
-        list.push(norm);
-      };
-      addRecipient(lastMessage.from, toRecipients);
-      lastMessage.to.forEach((addr) => {
-        const lower = addr.toLowerCase();
-        if (lastMessage.from && lower === lastMessage.from.toLowerCase())
-          return;
-        addRecipient(addr, ccRecipients);
-      });
-      if (toRecipients.length === 0 && ccRecipients.length > 0) {
-        toRecipients.push(ccRecipients.shift()!);
-      }
-      let subject = lastMessage.subject || email.subject || "";
-      if (!/^re:/i.test(subject)) subject = `Re: ${subject}`;
-      const rawBody = lastMessage.body || "";
-      const looksHtml = /<\w+[^>]*>/.test(rawBody);
-      let sanitizedBody = rawBody;
-      if (!looksHtml) {
-        sanitizedBody = this.escapeHtml(rawBody).replace(/\n/g, "<br>");
       } else {
-        sanitizedBody = rawBody
-          .replace(/<script[\s\S]*?<\/script>/gi, "")
-          .replace(/<style[\s\S]*?<\/style>/gi, "");
+        this.showStatus(
+          "Cannot open email (ID format not supported or API unavailable).",
+          "error",
+        );
       }
-      const quotedSeparator = "<br><br>----- Original Message -----<br>";
-      // Trim to avoid OWA htmlBody parameter range issues
-      const MAX_BODY = 15000; // conservative limit to stay under host constraints
-      const bodyTrimmed =
-        sanitizedBody.length > MAX_BODY
-          ? sanitizedBody.slice(0, MAX_BODY) + "…"
-          : sanitizedBody;
-      const htmlBody = `<br><br>${quotedSeparator}${bodyTrimmed}`;
-      Office.context.mailbox.displayNewMessageForm({
-        toRecipients,
-        ccRecipients,
-        subject,
-        htmlBody,
-        attachments: [],
-      });
     } catch (err) {
       console.error("Error opening message for reply", err);
       this.showStatus("Failed to open message in Outlook", "error");
@@ -1573,9 +1515,9 @@ export class TaskpaneManager {
 
   // Decode common HTML entities to plain text
   private decodeHtmlEntities(text: string): string {
-    const textarea = document.createElement("textarea");
-    textarea.innerHTML = text;
-    return textarea.value;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/html");
+    return doc.documentElement.textContent || "";
   }
 
   // Render a short summary as sanitized HTML: decode entities, remove empty lines, preserve new lines (as <br>), no &nbsp;, and cap font size via CSS
@@ -1635,6 +1577,20 @@ export class TaskpaneManager {
   }
 
   // Initialize the task pane
+  // API status tracking
+  private apiStatus = {
+    ewsAvailable: false,
+    graphAvailable: false,
+    currentEmailAvailable: false,
+    bulkAccessBlocked: false,
+  };
+
+  // Current analysis mode (used for tracking state and future features)
+  public getCurrentAnalysisMode(): "bulk" | "current" | "manual" {
+    return this._currentAnalysisMode;
+  }
+  private _currentAnalysisMode: "bulk" | "current" | "manual" = "bulk";
+
   public async initialize(): Promise<void> {
     await this.loadConfiguration();
     this.hideAllStates();
@@ -1645,6 +1601,10 @@ export class TaskpaneManager {
     this.enableAiFeaturesCheckbox.checked = !aiDisabled;
 
     this.updateAiStatus(); // Check AI status on initialization
+
+    // Check API availability and set up fallback mode UI
+    await this.checkApiAvailability();
+    this.setupFallbackModeUI();
 
     // Add diagnostic button event listener
     const diagnosticButton = document.getElementById("diagnosticButton");
@@ -1678,6 +1638,7 @@ export class TaskpaneManager {
     const testMailboxButton = document.getElementById("testMailboxAccess");
     const testAccountsButton = document.getElementById("testAccountDetection");
     const testEmailsButton = document.getElementById("testEmailReading");
+    const testGraphApiButton = document.getElementById("testGraphApi");
 
     if (testOfficeButton) {
       testOfficeButton.addEventListener("click", () =>
@@ -1697,6 +1658,643 @@ export class TaskpaneManager {
     if (testEmailsButton) {
       testEmailsButton.addEventListener("click", () => this.testEmailReading());
     }
+    if (testGraphApiButton) {
+      testGraphApiButton.addEventListener("click", () => this.testGraphApi());
+    }
+  }
+
+  /**
+   * Check API availability silently on startup
+   */
+  private async checkApiAvailability(): Promise<void> {
+    // Check if Office.context is available
+    if (
+      typeof Office === "undefined" ||
+      !Office.context ||
+      !Office.context.mailbox
+    ) {
+      this.apiStatus.bulkAccessBlocked = true;
+      return;
+    }
+
+    // Check EWS availability
+    if (typeof Office.context.mailbox.makeEwsRequestAsync === "function") {
+      // EWS API exists, but we need to test if it actually works
+      try {
+        const ewsWorks = await this.testEwsQuietly();
+        this.apiStatus.ewsAvailable = ewsWorks;
+      } catch {
+        this.apiStatus.ewsAvailable = false;
+      }
+    }
+
+    // Check current email availability
+    if (Office.context.mailbox.item) {
+      this.apiStatus.currentEmailAvailable = true;
+    }
+
+    // If EWS and Graph are both unavailable, mark bulk access as blocked
+    if (!this.apiStatus.ewsAvailable && !this.apiStatus.graphAvailable) {
+      this.apiStatus.bulkAccessBlocked = true;
+    }
+  }
+
+  /**
+   * Test EWS quietly without showing UI
+   */
+  private async testEwsQuietly(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 5000);
+
+      const testRequest = `<?xml version="1.0" encoding="utf-8"?>
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                       xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+                       xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+          <soap:Header>
+            <t:RequestServerVersion Version="Exchange2013" />
+          </soap:Header>
+          <soap:Body>
+            <m:GetFolder>
+              <m:FolderShape><t:BaseShape>IdOnly</t:BaseShape></m:FolderShape>
+              <m:FolderIds><t:DistinguishedFolderId Id="inbox" /></m:FolderIds>
+            </m:GetFolder>
+          </soap:Body>
+        </soap:Envelope>`;
+
+      try {
+        Office.context.mailbox.makeEwsRequestAsync(testRequest, (result) => {
+          clearTimeout(timeout);
+          resolve(result.status === Office.AsyncResultStatus.Succeeded);
+        });
+      } catch {
+        clearTimeout(timeout);
+        resolve(false);
+      }
+    });
+  }
+
+  /**
+   * Set up the fallback mode UI based on API availability
+   */
+  private setupFallbackModeUI(): void {
+    const banner = document.getElementById("apiStatusBanner");
+    const fallbackSection = document.getElementById("fallbackModeSection");
+    const bulkAnalysisStatus = document.getElementById("bulkAnalysisStatus");
+    const currentEmailStatus = document.getElementById("currentEmailStatus");
+    const ewsStatusIcon = document.getElementById("ewsStatusIcon");
+    const ewsStatusText = document.getElementById("ewsStatusText");
+    const graphStatusIcon = document.getElementById("graphStatusIcon");
+    const graphStatusText = document.getElementById("graphStatusText");
+    const currentEmailStatusIcon = document.getElementById(
+      "currentEmailStatusIcon",
+    );
+    const currentEmailStatusText = document.getElementById(
+      "currentEmailStatusText",
+    );
+    const toggleApiDetails = document.getElementById("toggleApiDetails");
+    const apiStatusDetails = document.getElementById("apiStatusDetails");
+
+    // Update API status display
+    if (ewsStatusIcon && ewsStatusText) {
+      if (this.apiStatus.ewsAvailable) {
+        ewsStatusIcon.textContent = "✅";
+        ewsStatusText.textContent = "EWS (Exchange Web Services): Available";
+      } else {
+        ewsStatusIcon.textContent = "❌";
+        ewsStatusText.textContent =
+          "EWS (Exchange Web Services): Blocked by organization";
+      }
+    }
+
+    if (graphStatusIcon && graphStatusText) {
+      if (this.apiStatus.graphAvailable) {
+        graphStatusIcon.textContent = "✅";
+        graphStatusText.textContent = "Microsoft Graph API: Available";
+      } else {
+        graphStatusIcon.textContent = "❌";
+        graphStatusText.textContent =
+          "Microsoft Graph API: Requires Azure AD setup";
+      }
+    }
+
+    if (currentEmailStatusIcon && currentEmailStatusText) {
+      if (this.apiStatus.currentEmailAvailable) {
+        currentEmailStatusIcon.textContent = "✅";
+        currentEmailStatusText.textContent = "Current Email Access: Available";
+      } else {
+        currentEmailStatusIcon.textContent = "⚠️";
+        currentEmailStatusText.textContent =
+          "Current Email Access: Open an email to use";
+      }
+    }
+
+    // Toggle API details
+    if (toggleApiDetails && apiStatusDetails) {
+      toggleApiDetails.addEventListener("click", () => {
+        const isHidden = apiStatusDetails.style.display === "none";
+        apiStatusDetails.style.display = isHidden ? "block" : "none";
+        toggleApiDetails.textContent = isHidden
+          ? "Hide Details"
+          : "Show Details";
+      });
+    }
+
+    // Update bulk analysis status
+    if (bulkAnalysisStatus) {
+      if (this.apiStatus.ewsAvailable || this.apiStatus.graphAvailable) {
+        bulkAnalysisStatus.className = "fallback-option-status available";
+        bulkAnalysisStatus.textContent = "✅ Available";
+      } else {
+        bulkAnalysisStatus.className = "fallback-option-status unavailable";
+        bulkAnalysisStatus.textContent =
+          "❌ Requires EWS or Graph API (blocked by organization)";
+      }
+    }
+
+    // Update current email status
+    if (currentEmailStatus) {
+      if (this.apiStatus.currentEmailAvailable) {
+        currentEmailStatus.className = "fallback-option-status available";
+        currentEmailStatus.textContent =
+          "✅ Available - Works with current email";
+      } else {
+        currentEmailStatus.className = "fallback-option-status unavailable";
+        currentEmailStatus.textContent = "⚠️ Open an email first";
+      }
+    }
+
+    // Show banner and fallback section if bulk access is blocked
+    if (this.apiStatus.bulkAccessBlocked) {
+      if (banner) {
+        banner.style.display = "block";
+        banner.className = "api-status-banner error";
+      }
+      if (fallbackSection) {
+        fallbackSection.style.display = "block";
+      }
+      // Hide the main controls since bulk analysis won't work
+      const mainControls = document.querySelector(".controls") as HTMLElement;
+      if (mainControls) {
+        mainControls.style.display = "none";
+      }
+    }
+
+    // Set up mode selection handlers
+    this.setupModeSelectionHandlers();
+  }
+
+  /**
+   * Set up event handlers for mode selection
+   */
+  private setupModeSelectionHandlers(): void {
+    const optionBulk = document.getElementById("optionBulkAnalysis");
+    const optionCurrent = document.getElementById("optionCurrentEmail");
+    const optionManual = document.getElementById("optionManualInput");
+
+    const fallbackSection = document.getElementById("fallbackModeSection");
+    const currentEmailSection = document.getElementById("currentEmailSection");
+    const manualInputSection = document.getElementById("manualInputSection");
+    const mainControls = document.querySelector(".controls") as HTMLElement;
+
+    // Bulk analysis option
+    if (optionBulk) {
+      optionBulk.addEventListener("click", () => {
+        if (this.apiStatus.ewsAvailable || this.apiStatus.graphAvailable) {
+          this._currentAnalysisMode = "bulk";
+          this.selectOption(optionBulk);
+          if (fallbackSection) fallbackSection.style.display = "none";
+          if (currentEmailSection) currentEmailSection.style.display = "none";
+          if (manualInputSection) manualInputSection.style.display = "none";
+          if (mainControls) mainControls.style.display = "block";
+        }
+      });
+
+      // Disable if not available
+      if (!this.apiStatus.ewsAvailable && !this.apiStatus.graphAvailable) {
+        optionBulk.classList.add("disabled");
+      }
+    }
+
+    // Current email option
+    if (optionCurrent) {
+      optionCurrent.addEventListener("click", () => {
+        this._currentAnalysisMode = "current";
+        this.selectOption(optionCurrent);
+        if (fallbackSection) fallbackSection.style.display = "none";
+        if (currentEmailSection) currentEmailSection.style.display = "block";
+        if (manualInputSection) manualInputSection.style.display = "none";
+        if (mainControls) mainControls.style.display = "none";
+        this.loadCurrentEmailInfo();
+      });
+    }
+
+    // Manual input option
+    if (optionManual) {
+      optionManual.addEventListener("click", () => {
+        this._currentAnalysisMode = "manual";
+        this.selectOption(optionManual);
+        if (fallbackSection) fallbackSection.style.display = "none";
+        if (currentEmailSection) currentEmailSection.style.display = "none";
+        if (manualInputSection) manualInputSection.style.display = "block";
+        if (mainControls) mainControls.style.display = "none";
+      });
+    }
+
+    // Back buttons
+    const backToModeSelection = document.getElementById("backToModeSelection");
+    const backToModeSelectionManual = document.getElementById(
+      "backToModeSelectionManual",
+    );
+
+    const showFallbackSection = () => {
+      if (fallbackSection) fallbackSection.style.display = "block";
+      if (currentEmailSection) currentEmailSection.style.display = "none";
+      if (manualInputSection) manualInputSection.style.display = "none";
+      if (mainControls) mainControls.style.display = "none";
+    };
+
+    if (backToModeSelection) {
+      backToModeSelection.addEventListener("click", showFallbackSection);
+    }
+    if (backToModeSelectionManual) {
+      backToModeSelectionManual.addEventListener("click", showFallbackSection);
+    }
+
+    // Analyze current email button
+    const analyzeCurrentBtn = document.getElementById("analyzeCurrentEmailBtn");
+    if (analyzeCurrentBtn) {
+      analyzeCurrentBtn.addEventListener("click", () =>
+        this.analyzeCurrentEmail(),
+      );
+    }
+
+    // Manual input buttons
+    const analyzeManualBtn = document.getElementById("analyzeManualEmailBtn");
+    const clearManualBtn = document.getElementById("clearManualInput");
+
+    if (analyzeManualBtn) {
+      analyzeManualBtn.addEventListener("click", () =>
+        this.analyzeManualEmail(),
+      );
+    }
+    if (clearManualBtn) {
+      clearManualBtn.addEventListener("click", () => {
+        const textarea = document.getElementById(
+          "manualEmailInput",
+        ) as HTMLTextAreaElement;
+        if (textarea) textarea.value = "";
+      });
+    }
+  }
+
+  /**
+   * Select a fallback option visually
+   */
+  private selectOption(selectedElement: HTMLElement): void {
+    document.querySelectorAll(".fallback-option").forEach((el) => {
+      el.classList.remove("selected");
+    });
+    selectedElement.classList.add("selected");
+  }
+
+  /**
+   * Load current email information
+   */
+  private loadCurrentEmailInfo(): void {
+    const subjectEl = document.getElementById("currentEmailSubject");
+    const fromEl = document.getElementById("currentEmailFrom");
+    const dateEl = document.getElementById("currentEmailDate");
+    const toEl = document.getElementById("currentEmailTo");
+    const analyzeBtn = document.getElementById(
+      "analyzeCurrentEmailBtn",
+    ) as HTMLButtonElement;
+
+    if (!Office.context?.mailbox?.item) {
+      if (subjectEl) subjectEl.textContent = "No email selected";
+      if (fromEl) fromEl.textContent = "-";
+      if (dateEl) dateEl.textContent = "-";
+      if (toEl) toEl.textContent = "-";
+      if (analyzeBtn) analyzeBtn.disabled = true;
+      return;
+    }
+
+    const item = Office.context.mailbox.item;
+
+    // Get subject
+    if (item.subject) {
+      if (subjectEl) subjectEl.textContent = item.subject;
+    }
+
+    // Get from
+    if (item.from) {
+      if (fromEl) {
+        fromEl.textContent = item.from.displayName
+          ? `${item.from.displayName} <${item.from.emailAddress}>`
+          : item.from.emailAddress;
+      }
+    }
+
+    // Get date
+    if (item.dateTimeCreated) {
+      if (dateEl) dateEl.textContent = item.dateTimeCreated.toLocaleString();
+    }
+
+    // Get to recipients
+    if (item.to && item.to.length > 0) {
+      if (toEl) {
+        const recipients = item.to
+          .slice(0, 3)
+          .map((r: any) => r.emailAddress)
+          .join(", ");
+        toEl.textContent = item.to.length > 3 ? `${recipients}...` : recipients;
+      }
+    }
+
+    // Enable analyze button if we have subject
+    if (analyzeBtn && item.subject) {
+      analyzeBtn.disabled = false;
+    }
+  }
+
+  /**
+   * Analyze the currently viewed email
+   */
+  private async analyzeCurrentEmail(): Promise<void> {
+    const analyzeBtn = document.getElementById(
+      "analyzeCurrentEmailBtn",
+    ) as HTMLButtonElement;
+    const originalText = analyzeBtn?.textContent || "Analyze This Email";
+
+    try {
+      if (analyzeBtn) {
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = "Analyzing...";
+      }
+
+      if (!Office.context?.mailbox?.item) {
+        this.showStatus("No email is currently open", "error");
+        return;
+      }
+
+      const item = Office.context.mailbox.item;
+
+      // Get email body
+      const bodyPromise = new Promise<string>((resolve) => {
+        item.body.getAsync(Office.CoercionType.Text, (result) => {
+          if (result.status === Office.AsyncResultStatus.Succeeded) {
+            resolve(result.value);
+          } else {
+            resolve("");
+          }
+        });
+      });
+
+      const body = await bodyPromise;
+      const daysWithoutResponse = this.calculateDaysSince(
+        item.dateTimeCreated || new Date(),
+      );
+
+      // Create a follow-up email object
+      const email: FollowupEmail = {
+        id: item.itemId || `current-${Date.now()}`,
+        subject: item.subject || "(No subject)",
+        recipients: item.to?.map((r: any) => r.emailAddress) || [],
+        sentDate: item.dateTimeCreated || new Date(),
+        body: body,
+        summary: body.substring(0, 200) + (body.length > 200 ? "..." : ""),
+        priority: "medium",
+        daysWithoutResponse: daysWithoutResponse,
+        conversationId: (item as any).conversationId || "",
+        hasAttachments: false,
+        accountEmail: Office.context.mailbox.userProfile?.emailAddress || "",
+        threadMessages: [],
+        isSnoozed: false,
+        isDismissed: false,
+      };
+
+      // Calculate priority based on days
+      if (daysWithoutResponse >= 7) {
+        email.priority = "high";
+      } else if (daysWithoutResponse >= 3) {
+        email.priority = "medium";
+      } else {
+        email.priority = "low";
+      }
+
+      // If AI is enabled, enhance with LLM
+      if (this.llmService && this.enableLlmSummaryCheckbox?.checked) {
+        try {
+          const llmSummary = await this.llmService.summarizeEmail(body);
+          email.llmSummary = llmSummary;
+        } catch (llmError) {
+          console.warn("LLM summary failed:", llmError);
+        }
+      }
+
+      if (this.llmService && this.enableLlmSuggestionsCheckbox?.checked) {
+        try {
+          const suggestions = await this.llmService.generateFollowupSuggestions(
+            body,
+            `Subject: ${email.subject}, Days without response: ${daysWithoutResponse}`,
+          );
+          email.llmSuggestion = suggestions.join("\n");
+        } catch (llmError) {
+          console.warn("LLM suggestion failed:", llmError);
+        }
+      }
+
+      // Display the result
+      this.displaySingleEmailResult(email);
+      this.showStatus("Email analyzed successfully!", "success");
+    } catch (error) {
+      this.showStatus(`Analysis failed: ${(error as Error).message}`, "error");
+    } finally {
+      if (analyzeBtn) {
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = originalText;
+      }
+    }
+  }
+
+  /**
+   * Analyze manually pasted email
+   */
+  private async analyzeManualEmail(): Promise<void> {
+    const textarea = document.getElementById(
+      "manualEmailInput",
+    ) as HTMLTextAreaElement;
+    const analyzeBtn = document.getElementById(
+      "analyzeManualEmailBtn",
+    ) as HTMLButtonElement;
+    const originalText = analyzeBtn?.textContent || "Analyze Email";
+
+    if (!textarea || !textarea.value.trim()) {
+      this.showStatus("Please paste email content first", "error");
+      return;
+    }
+
+    try {
+      if (analyzeBtn) {
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = "Analyzing...";
+      }
+
+      const content = textarea.value;
+
+      // Parse the pasted content
+      const parsed = this.parseManualEmailContent(content);
+      const daysWithoutResponse = this.calculateDaysSince(
+        parsed.date || new Date(),
+      );
+
+      // Create a follow-up email object
+      const email: FollowupEmail = {
+        id: `manual-${Date.now()}`,
+        subject: parsed.subject || "(No subject)",
+        recipients: parsed.to ? [parsed.to] : [],
+        sentDate: parsed.date || new Date(),
+        body: parsed.body,
+        summary:
+          parsed.body.substring(0, 200) +
+          (parsed.body.length > 200 ? "..." : ""),
+        priority: "medium",
+        daysWithoutResponse: daysWithoutResponse,
+        conversationId: "",
+        hasAttachments: false,
+        accountEmail:
+          Office.context?.mailbox?.userProfile?.emailAddress || "manual",
+        threadMessages: [],
+        isSnoozed: false,
+        isDismissed: false,
+      };
+
+      // Calculate priority
+      if (daysWithoutResponse >= 7) {
+        email.priority = "high";
+      } else if (daysWithoutResponse >= 3) {
+        email.priority = "medium";
+      } else {
+        email.priority = "low";
+      }
+
+      // If AI is enabled, enhance with LLM
+      if (this.llmService && this.enableLlmSummaryCheckbox?.checked) {
+        try {
+          const llmSummary = await this.llmService.summarizeEmail(parsed.body);
+          email.llmSummary = llmSummary;
+        } catch (llmError) {
+          console.warn("LLM summary failed:", llmError);
+        }
+      }
+
+      if (this.llmService && this.enableLlmSuggestionsCheckbox?.checked) {
+        try {
+          const suggestions = await this.llmService.generateFollowupSuggestions(
+            parsed.body,
+            `Subject: ${email.subject}, Days without response: ${daysWithoutResponse}`,
+          );
+          email.llmSuggestion = suggestions.join("\n");
+        } catch (llmError) {
+          console.warn("LLM suggestion failed:", llmError);
+        }
+      }
+
+      // Display the result
+      this.displaySingleEmailResult(email);
+      this.showStatus("Email analyzed successfully!", "success");
+    } catch (error) {
+      this.showStatus(`Analysis failed: ${(error as Error).message}`, "error");
+    } finally {
+      if (analyzeBtn) {
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = originalText;
+      }
+    }
+  }
+
+  /**
+   * Parse manually pasted email content
+   */
+  private parseManualEmailContent(content: string): {
+    subject: string;
+    from: string;
+    fromName: string;
+    to: string;
+    date: Date | null;
+    body: string;
+  } {
+    const lines = content.split("\n");
+    let subject = "";
+    let from = "";
+    let fromName = "";
+    let to = "";
+    let date: Date | null = null;
+    let bodyStartIndex = 0;
+
+    // Parse headers
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+
+      if (line.toLowerCase().startsWith("subject:")) {
+        subject = line.substring(8).trim();
+        bodyStartIndex = i + 1;
+      } else if (line.toLowerCase().startsWith("from:")) {
+        const fromValue = line.substring(5).trim();
+        // Try to extract name and email
+        const emailMatch = fromValue.match(/<([^>]+)>/);
+        if (emailMatch) {
+          from = emailMatch[1];
+          fromName = fromValue.replace(/<[^>]+>/, "").trim();
+        } else {
+          from = fromValue;
+          fromName = fromValue;
+        }
+        bodyStartIndex = i + 1;
+      } else if (line.toLowerCase().startsWith("to:")) {
+        to = line.substring(3).trim();
+        bodyStartIndex = i + 1;
+      } else if (line.toLowerCase().startsWith("date:")) {
+        const dateStr = line.substring(5).trim();
+        const parsedDate = new Date(dateStr);
+        if (!isNaN(parsedDate.getTime())) {
+          date = parsedDate;
+        }
+        bodyStartIndex = i + 1;
+      } else if (line === "" && bodyStartIndex > 0) {
+        // Empty line after headers indicates start of body
+        bodyStartIndex = i + 1;
+        break;
+      }
+    }
+
+    // Extract body
+    const body = lines.slice(bodyStartIndex).join("\n").trim();
+
+    return { subject, from, fromName, to, date, body };
+  }
+
+  /**
+   * Calculate days since a date
+   */
+  private calculateDaysSince(date: Date): number {
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }
+
+  /**
+   * Display a single email analysis result
+   */
+  private displaySingleEmailResult(email: FollowupEmail): void {
+    // Add to allEmails for action button handlers
+    this.allEmails = [email];
+
+    this.hideAllStates();
+    this.emailListDiv.style.display = "block";
+    this.emailListDiv.innerHTML = "";
+
+    const emailElement = this.createEmailElement(email);
+    this.emailListDiv.appendChild(emailElement);
   }
 
   // Diagnostic modal methods
@@ -1808,9 +2406,9 @@ export class TaskpaneManager {
       // Test user profile
       if (Office.context.mailbox.userProfile) {
         const profile = Office.context.mailbox.userProfile;
-        output.innerHTML += `✅ User email: ${profile.emailAddress || "N/A"}<br>`;
-        output.innerHTML += `✅ Display name: ${profile.displayName || "N/A"}<br>`;
-        output.innerHTML += `✅ Time zone: ${profile.timeZone || "N/A"}<br>`;
+        output.innerHTML += `✅ User email: ${this.escapeHtml(profile.emailAddress || "N/A")}<br>`;
+        output.innerHTML += `✅ Display name: ${this.escapeHtml(profile.displayName || "N/A")}<br>`;
+        output.innerHTML += `✅ Time zone: ${this.escapeHtml(profile.timeZone || "N/A")}<br>`;
       } else {
         output.innerHTML += "❌ User profile not available<br>";
       }
@@ -1818,15 +2416,15 @@ export class TaskpaneManager {
       // Test diagnostics
       if (Office.context.mailbox.diagnostics) {
         const diag = Office.context.mailbox.diagnostics;
-        output.innerHTML += `✅ Host name: ${diag.hostName || "N/A"}<br>`;
-        output.innerHTML += `✅ Host version: ${diag.hostVersion || "N/A"}<br>`;
+        output.innerHTML += `✅ Host name: ${this.escapeHtml(diag.hostName || "N/A")}<br>`;
+        output.innerHTML += `✅ Host version: ${this.escapeHtml(diag.hostVersion || "N/A")}<br>`;
         // OWAView is only available in Outlook on the web, not in desktop Outlook
         const owaView = diag.OWAView
           ? diag.OWAView
           : diag.hostName === "Outlook"
             ? "N/A (Desktop Outlook)"
             : "N/A";
-        output.innerHTML += `✅ OWA view: ${owaView}<br>`;
+        output.innerHTML += `✅ OWA view: ${this.escapeHtml(owaView)}<br>`;
       } else {
         output.innerHTML += "❌ Diagnostics not available<br>";
       }
@@ -1834,7 +2432,7 @@ export class TaskpaneManager {
       output.innerHTML +=
         "<br><strong>Mailbox Access Test Complete</strong><br><br>";
     } catch (error) {
-      output.innerHTML += `❌ Error: ${(error as Error).message}<br>`;
+      output.innerHTML += `❌ Error: ${this.escapeHtml((error as Error).message)}<br>`;
     }
   }
 
@@ -1945,9 +2543,9 @@ export class TaskpaneManager {
           "<strong>🔍 Testing Account Detection...</strong><br>";
 
         if (userEmail) {
-          output.innerHTML += `✅ User Profile Email: ${userEmail}<br>`;
+          output.innerHTML += `✅ User Profile Email: ${this.escapeHtml(userEmail)}<br>`;
           if (userDisplayName) {
-            output.innerHTML += `✅ Display Name: ${userDisplayName}<br>`;
+            output.innerHTML += `✅ Display Name: ${this.escapeHtml(userDisplayName)}<br>`;
           }
         } else {
           output.innerHTML += "⚠️ Could not access user profile email<br>";
@@ -1957,7 +2555,7 @@ export class TaskpaneManager {
           output.innerHTML +=
             "✅ User identity token obtained successfully<br>";
           if (userEmail) {
-            output.innerHTML += `✅ Account detected: ${userEmail}<br>`;
+            output.innerHTML += `✅ Account detected: ${this.escapeHtml(userEmail)}<br>`;
           }
         } else {
           output.innerHTML += "⚠️ No accounts detected via identity token<br>";
@@ -2212,7 +2810,7 @@ export class TaskpaneManager {
         if (emails.length > 0) {
           output.innerHTML += `✅ Successfully read ${emails.length} email(s)<br>`;
           emails.forEach((email, index) => {
-            output.innerHTML += `&nbsp;&nbsp;${index + 1}. ${email.subject} (${email.sentDate.toLocaleDateString()})<br>`;
+            output.innerHTML += `&nbsp;&nbsp;${index + 1}. ${this.escapeHtml(email.subject)} (${email.sentDate.toLocaleDateString()})<br>`;
           });
         } else {
           output.innerHTML +=
@@ -2247,6 +2845,601 @@ export class TaskpaneManager {
         "<br><strong>Email Reading Test Complete</strong><br><br>";
     } catch (error) {
       output.innerHTML += `❌ Error: ${(error as Error).message}<br>`;
+    }
+  }
+
+  private async testGraphApi(): Promise<void> {
+    const output = document.getElementById("diagnosticOutput");
+    if (!output) return;
+
+    const button = document.getElementById("testGraphApi");
+    const originalButtonText = button?.textContent || "Test Graph API";
+
+    try {
+      // Disable button and show loading state
+      if (button) {
+        (button as HTMLButtonElement).disabled = true;
+        (button as HTMLButtonElement).textContent = "Testing...";
+      }
+
+      output.innerHTML =
+        "<strong>🔗 Testing Microsoft Graph API...</strong><br>";
+      output.innerHTML +=
+        "⏳ This test checks if Graph API can be used as an alternative to EWS...<br><br>";
+
+      // Step 1: Check if Office.auth is available
+      output.innerHTML +=
+        "<strong>Step 1: Checking Office.auth availability...</strong><br>";
+
+      if (typeof Office === "undefined" || !Office.context) {
+        output.innerHTML += "❌ Office.context is not available<br>";
+        output.innerHTML +=
+          "<br><strong>Graph API Test Complete</strong><br><br>";
+        return;
+      }
+
+      // Check if Office.auth exists (SSO capability)
+      const hasAuth = typeof (Office as any).auth !== "undefined";
+      if (hasAuth) {
+        output.innerHTML += "✅ Office.auth is available (SSO supported)<br>";
+      } else {
+        output.innerHTML += "⚠️ Office.auth is not available<br>";
+        output.innerHTML +=
+          "ℹ️ SSO requires manifest configuration and Azure AD app registration<br>";
+      }
+
+      // Step 2: Try to get access token
+      output.innerHTML +=
+        "<br><strong>Step 2: Attempting to get access token...</strong><br>";
+
+      if (hasAuth && (Office as any).auth.getAccessToken) {
+        try {
+          const tokenOptions = {
+            allowSignInPrompt: false,
+            allowConsentPrompt: false,
+            forMSGraphAccess: true,
+          };
+
+          const tokenPromise = (Office as any).auth.getAccessToken(
+            tokenOptions,
+          );
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(
+              () =>
+                reject(new Error("Token request timed out after 10 seconds")),
+              10000,
+            );
+          });
+
+          const token = await Promise.race([tokenPromise, timeoutPromise]);
+
+          if (token) {
+            output.innerHTML += "✅ Access token obtained successfully<br>";
+            output.innerHTML += `&nbsp;&nbsp;Token length: ${token.length} characters<br>`;
+
+            // Try to decode token to get some info (JWT has 3 parts separated by .)
+            const parts = token.split(".");
+            if (parts.length === 3) {
+              try {
+                const payload = JSON.parse(atob(parts[1]));
+                if (payload.aud) {
+                  output.innerHTML += `&nbsp;&nbsp;Audience: ${payload.aud}<br>`;
+                }
+                if (payload.scp) {
+                  output.innerHTML += `&nbsp;&nbsp;Scopes: ${payload.scp}<br>`;
+                }
+                if (payload.upn || payload.unique_name) {
+                  output.innerHTML += `&nbsp;&nbsp;User: ${payload.upn || payload.unique_name}<br>`;
+                }
+              } catch {
+                // Token parsing failed, that's okay
+              }
+            }
+
+            // Step 3: Try a simple Graph API call
+            output.innerHTML +=
+              "<br><strong>Step 3: Testing Graph API call...</strong><br>";
+            output.innerHTML += "⏳ Calling /me endpoint...<br>";
+
+            try {
+              const response = await fetch(
+                "https://graph.microsoft.com/v1.0/me",
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                  },
+                },
+              );
+
+              if (response.ok) {
+                const userData = await response.json();
+                output.innerHTML += "✅ Graph API /me call successful<br>";
+                output.innerHTML += `&nbsp;&nbsp;Display Name: ${this.escapeHtml(userData.displayName || "N/A")}<br>`;
+                output.innerHTML += `&nbsp;&nbsp;Email: ${this.escapeHtml(userData.mail || userData.userPrincipalName || "N/A")}<br>`;
+
+                // Step 4: Try to get mail folders
+                output.innerHTML +=
+                  "<br><strong>Step 4: Testing mail access...</strong><br>";
+                output.innerHTML += "⏳ Calling /me/mailFolders...<br>";
+
+                try {
+                  const foldersResponse = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/mailFolders?$top=5",
+                    {
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                      },
+                    },
+                  );
+
+                  if (foldersResponse.ok) {
+                    const foldersData = await foldersResponse.json();
+                    output.innerHTML += "✅ Mail folders accessible<br>";
+                    if (foldersData.value && foldersData.value.length > 0) {
+                      output.innerHTML += "&nbsp;&nbsp;Folders found:<br>";
+                      foldersData.value.slice(0, 5).forEach((folder: any) => {
+                        output.innerHTML += `&nbsp;&nbsp;&nbsp;&nbsp;• ${this.escapeHtml(folder.displayName)} (${folder.totalItemCount || 0} items)<br>`;
+                      });
+                    }
+
+                    // Step 5: Try to get sent items
+                    output.innerHTML +=
+                      "<br><strong>Step 5: Testing sent items access...</strong><br>";
+                    output.innerHTML += "⏳ Getting recent sent emails...<br>";
+
+                    try {
+                      const sentResponse = await fetch(
+                        "https://graph.microsoft.com/v1.0/me/mailFolders/sentItems/messages?$top=3&$select=subject,sentDateTime,toRecipients",
+                        {
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json",
+                          },
+                        },
+                      );
+
+                      if (sentResponse.ok) {
+                        const sentData = await sentResponse.json();
+                        output.innerHTML += "✅ Sent items accessible<br>";
+                        if (sentData.value && sentData.value.length > 0) {
+                          output.innerHTML +=
+                            "&nbsp;&nbsp;Recent sent emails:<br>";
+                          sentData.value.forEach(
+                            (email: any, index: number) => {
+                              const sentDate = new Date(
+                                email.sentDateTime,
+                              ).toLocaleDateString();
+                              output.innerHTML += `&nbsp;&nbsp;&nbsp;&nbsp;${index + 1}. ${this.escapeHtml(email.subject || "(No subject)")} (${sentDate})<br>`;
+                            },
+                          );
+                          output.innerHTML +=
+                            "<br>🎉 <strong>Graph API can substitute EWS!</strong><br>";
+                          output.innerHTML +=
+                            "ℹ️ The add-in can be updated to use Microsoft Graph API instead of EWS.<br>";
+                        } else {
+                          output.innerHTML += "⚠️ No sent emails found<br>";
+                        }
+                      } else {
+                        const errorText = await sentResponse.text();
+                        output.innerHTML += `❌ Sent items access failed: ${sentResponse.status}<br>`;
+                        output.innerHTML += `&nbsp;&nbsp;Error: ${errorText.substring(0, 200)}<br>`;
+                        output.innerHTML +=
+                          "ℹ️ Mail.Read permission may be missing from the app registration<br>";
+                      }
+                    } catch (sentError) {
+                      output.innerHTML += `❌ Sent items request failed: ${(sentError as Error).message}<br>`;
+                    }
+                  } else {
+                    const errorText = await foldersResponse.text();
+                    output.innerHTML += `❌ Mail folders access failed: ${foldersResponse.status}<br>`;
+                    output.innerHTML += `&nbsp;&nbsp;Error: ${errorText.substring(0, 200)}<br>`;
+                    output.innerHTML +=
+                      "ℹ️ Mail.Read permission may be missing from the app registration<br>";
+                  }
+                } catch (foldersError) {
+                  output.innerHTML += `❌ Mail folders request failed: ${(foldersError as Error).message}<br>`;
+                }
+              } else {
+                const errorText = await response.text();
+                output.innerHTML += `❌ Graph API /me call failed: ${response.status}<br>`;
+                output.innerHTML += `&nbsp;&nbsp;Error: ${errorText.substring(0, 200)}<br>`;
+
+                if (response.status === 401) {
+                  output.innerHTML +=
+                    "ℹ️ The token may need to be exchanged for a Graph token (on-behalf-of flow)<br>";
+                  output.innerHTML +=
+                    "ℹ️ This requires a server-side component to exchange the token<br>";
+                }
+              }
+            } catch (graphError) {
+              output.innerHTML += `❌ Graph API call failed: ${(graphError as Error).message}<br>`;
+              if ((graphError as Error).message.includes("Failed to fetch")) {
+                output.innerHTML +=
+                  "ℹ️ Network request blocked. CORS or network policy may be blocking the request.<br>";
+              }
+            }
+          } else {
+            output.innerHTML += "⚠️ Empty token received<br>";
+          }
+        } catch (tokenError) {
+          const errorMsg = (tokenError as any).message || String(tokenError);
+          const errorCode = (tokenError as any).code;
+
+          output.innerHTML += `❌ Token acquisition failed<br>`;
+          output.innerHTML += `&nbsp;&nbsp;Error: ${errorMsg}<br>`;
+          if (errorCode) {
+            output.innerHTML += `&nbsp;&nbsp;Code: ${errorCode}<br>`;
+          }
+
+          // Provide guidance based on error
+          if (errorCode === 13001 || errorMsg.includes("13001")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13001: SSO is not supported in this environment<br>";
+            output.innerHTML +=
+              "&nbsp;&nbsp;• Manifest may not have WebApplicationInfo configured<br>";
+            output.innerHTML +=
+              "&nbsp;&nbsp;• Azure AD app registration may be missing<br>";
+          } else if (errorCode === 13002 || errorMsg.includes("13002")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13002: User needs to consent to the app<br>";
+            output.innerHTML +=
+              "&nbsp;&nbsp;• Try with allowConsentPrompt: true<br>";
+          } else if (errorCode === 13003 || errorMsg.includes("13003")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13003: Azure AD app configuration issue<br>";
+            output.innerHTML +=
+              "&nbsp;&nbsp;• Check the application ID in manifest matches Azure AD<br>";
+          } else if (errorCode === 13005 || errorMsg.includes("13005")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13005: Resource issue - check the API permissions<br>";
+          } else if (errorCode === 13006 || errorMsg.includes("13006")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13006: SSO failed - user may need to sign in<br>";
+          } else if (errorCode === 13007 || errorMsg.includes("13007")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13007: Office is in offline mode<br>";
+          } else if (errorCode === 13008 || errorMsg.includes("13008")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13008: Previous SSO operation still in progress<br>";
+          } else if (errorCode === 13010 || errorMsg.includes("13010")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13010: Running in Office on the web in Edge Legacy<br>";
+          } else if (errorCode === 13012 || errorMsg.includes("13012")) {
+            output.innerHTML +=
+              "<br>ℹ️ Error 13012: Office version doesn't support SSO<br>";
+          }
+
+          output.innerHTML +=
+            "<br><strong>📋 To enable Graph API, you need:</strong><br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;1. Register an app in Azure AD (Microsoft Entra)<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;2. Add WebApplicationInfo to manifest.xml<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;3. Configure API permissions (Mail.Read, User.Read)<br>";
+          output.innerHTML +=
+            "&nbsp;&nbsp;4. Admin consent for the organization<br>";
+        }
+      } else {
+        output.innerHTML +=
+          "⚠️ Office.auth.getAccessToken is not available<br>";
+        output.innerHTML +=
+          "ℹ️ SSO requires Azure AD registration (admin access needed)<br>";
+      }
+
+      // Step 3 (Alternative): Try callback token approach - NO Azure AD needed!
+      output.innerHTML +=
+        "<br><strong>Step 3 (Alternative): Testing Callback Token (No Azure AD needed)...</strong><br>";
+      output.innerHTML +=
+        "ℹ️ This approach uses existing add-in permissions without Azure AD registration<br>";
+
+      await this.testCallbackTokenApproach(output);
+
+      output.innerHTML +=
+        "<br><strong>✅ Graph API Test Complete</strong><br><br>";
+    } catch (error) {
+      output.innerHTML += `❌ Unexpected error: ${(error as Error).message}<br>`;
+    } finally {
+      // Re-enable button
+      if (button) {
+        (button as HTMLButtonElement).disabled = false;
+        (button as HTMLButtonElement).textContent = originalButtonText;
+      }
+    }
+  }
+
+  /**
+   * Test callback token approach for REST API access
+   * This method doesn't require Azure AD registration!
+   */
+  private async testCallbackTokenApproach(
+    output: HTMLElement,
+  ): Promise<boolean> {
+    try {
+      if (
+        !Office.context.mailbox ||
+        !Office.context.mailbox.getCallbackTokenAsync
+      ) {
+        output.innerHTML +=
+          "❌ getCallbackTokenAsync not available on this platform<br>";
+        return false;
+      }
+
+      output.innerHTML += "⏳ Getting callback token (REST mode)...<br>";
+
+      // Try to get a REST callback token first
+      let tokenResult = await new Promise<{
+        success: boolean;
+        token?: string;
+        error?: string;
+        errorCode?: number;
+        restUrl?: string;
+        mode?: string;
+      }>((resolve) => {
+        const timeout = setTimeout(() => {
+          resolve({ success: false, error: "Token request timed out" });
+        }, 15000);
+
+        Office.context.mailbox.getCallbackTokenAsync(
+          { isRest: true },
+          (result) => {
+            clearTimeout(timeout);
+            if (result.status === Office.AsyncResultStatus.Succeeded) {
+              resolve({
+                success: true,
+                token: result.value,
+                restUrl: (Office.context.mailbox as any).restUrl,
+                mode: "REST",
+              });
+            } else {
+              resolve({
+                success: false,
+                error: result.error?.message || "Failed to get token",
+                errorCode: (result.error as any)?.code,
+                mode: "REST",
+              });
+            }
+          },
+        );
+      });
+
+      // If REST mode failed, try EWS mode (without isRest flag)
+      if (!tokenResult.success) {
+        output.innerHTML += `❌ REST callback token failed: ${tokenResult.error}<br>`;
+        if (tokenResult.errorCode) {
+          output.innerHTML += `&nbsp;&nbsp;Error Code: ${tokenResult.errorCode}<br>`;
+        }
+
+        output.innerHTML +=
+          "<br>⏳ Trying EWS callback token (legacy mode)...<br>";
+
+        tokenResult = await new Promise<{
+          success: boolean;
+          token?: string;
+          error?: string;
+          errorCode?: number;
+          restUrl?: string;
+          mode?: string;
+        }>((resolve) => {
+          const timeout = setTimeout(() => {
+            resolve({ success: false, error: "Token request timed out" });
+          }, 15000);
+
+          // Try without isRest - this gets an EWS token
+          Office.context.mailbox.getCallbackTokenAsync((result) => {
+            clearTimeout(timeout);
+            if (result.status === Office.AsyncResultStatus.Succeeded) {
+              resolve({
+                success: true,
+                token: result.value,
+                mode: "EWS",
+              });
+            } else {
+              resolve({
+                success: false,
+                error: result.error?.message || "Failed to get token",
+                errorCode: (result.error as any)?.code,
+                mode: "EWS",
+              });
+            }
+          });
+        });
+
+        if (!tokenResult.success) {
+          output.innerHTML += `❌ EWS callback token also failed: ${tokenResult.error}<br>`;
+          if (tokenResult.errorCode) {
+            output.innerHTML += `&nbsp;&nbsp;Error Code: ${tokenResult.errorCode}<br>`;
+          }
+
+          // Check diagnostics info
+          output.innerHTML += "<br>📋 <strong>Environment Info:</strong><br>";
+          try {
+            const diag = Office.context.mailbox.diagnostics;
+            output.innerHTML += `&nbsp;&nbsp;Host: ${diag?.hostName || "Unknown"}<br>`;
+            output.innerHTML += `&nbsp;&nbsp;Version: ${diag?.hostVersion || "Unknown"}<br>`;
+            output.innerHTML += `&nbsp;&nbsp;OWA View: ${diag?.OWAView || "N/A"}<br>`;
+          } catch {
+            output.innerHTML += "&nbsp;&nbsp;Could not get diagnostics<br>";
+          }
+
+          output.innerHTML +=
+            "<br>⚠️ <strong>Both token methods failed.</strong><br>";
+          output.innerHTML +=
+            "ℹ️ This suggests Exchange/M365 policies are blocking add-in API access.<br>";
+          output.innerHTML +=
+            "ℹ️ Contact your IT administrator to check if add-in mail access is enabled.<br>";
+          return false;
+        }
+      }
+
+      output.innerHTML += `✅ Callback token obtained successfully (${tokenResult.mode} mode)<br>`;
+      output.innerHTML += `&nbsp;&nbsp;Token length: ${tokenResult.token?.length} characters<br>`;
+
+      // Check for REST URL - only use REST URL if we got a REST token
+      let apiUrl: string;
+      if (tokenResult.mode === "REST") {
+        apiUrl = tokenResult.restUrl || "https://outlook.office.com/api/v2.0";
+        output.innerHTML += `&nbsp;&nbsp;REST URL: ${apiUrl}<br>`;
+      } else {
+        // EWS token - we can't use REST API with it
+        output.innerHTML +=
+          "<br>⚠️ EWS token obtained, but this requires EWS API (not REST)<br>";
+        output.innerHTML +=
+          "ℹ️ EWS token can be used with makeEwsRequestAsync but that's already failing.<br>";
+        output.innerHTML +=
+          "ℹ️ The EWS token approach doesn't help if EWS is blocked.<br>";
+        return false;
+      }
+
+      const restUrl = apiUrl;
+
+      // Try to call the REST API
+      output.innerHTML +=
+        "<br>⏳ Testing REST API call to get sent items...<br>";
+
+      try {
+        // Build the REST URL for sent items
+        const sentItemsUrl = `${restUrl}/me/mailfolders/sentitems/messages?$top=3&$select=Subject,DateTimeSent,ToRecipients`;
+
+        const response = await fetch(sentItemsUrl, {
+          headers: {
+            Authorization: `Bearer ${tokenResult.token}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          output.innerHTML += "✅ REST API call successful!<br>";
+
+          if (data.value && data.value.length > 0) {
+            output.innerHTML += "&nbsp;&nbsp;Recent sent emails:<br>";
+            data.value.forEach((email: any, index: number) => {
+              const sentDate = email.DateTimeSent
+                ? new Date(email.DateTimeSent).toLocaleDateString()
+                : "Unknown";
+              output.innerHTML += `&nbsp;&nbsp;&nbsp;&nbsp;${index + 1}. ${this.escapeHtml(email.Subject || "(No subject)")} (${sentDate})<br>`;
+            });
+
+            output.innerHTML +=
+              "<br>🎉 <strong style='color: green;'>SUCCESS! Callback Token + REST API works!</strong><br>";
+            output.innerHTML +=
+              "ℹ️ This can replace EWS without needing Azure AD registration.<br>";
+            output.innerHTML +=
+              "ℹ️ The add-in can be updated to use REST API with callback tokens.<br>";
+            return true;
+          } else {
+            output.innerHTML += "⚠️ No sent emails found<br>";
+            output.innerHTML +=
+              "ℹ️ REST API access works, but no emails in timeframe<br>";
+            return true;
+          }
+        } else {
+          const errorText = await response.text();
+          output.innerHTML += `❌ REST API call failed: ${response.status} ${response.statusText}<br>`;
+
+          // Parse error for more details
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.error) {
+              output.innerHTML += `&nbsp;&nbsp;Error Code: ${this.escapeHtml(errorJson.error.code || "Unknown")}<br>`;
+              output.innerHTML += `&nbsp;&nbsp;Message: ${this.escapeHtml(errorJson.error.message || errorText.substring(0, 200))}<br>`;
+            }
+          } catch {
+            output.innerHTML += `&nbsp;&nbsp;Error: ${this.escapeHtml(errorText.substring(0, 200))}<br>`;
+          }
+
+          if (response.status === 401) {
+            output.innerHTML +=
+              "ℹ️ Token may have expired or lacks required permissions<br>";
+          } else if (response.status === 403) {
+            output.innerHTML +=
+              "ℹ️ Access forbidden - organization may restrict REST API access<br>";
+          } else if (response.status === 404) {
+            output.innerHTML +=
+              "ℹ️ Endpoint not found - try different REST URL format<br>";
+
+            // Try alternative URL format
+            output.innerHTML += "<br>⏳ Trying Microsoft Graph endpoint...<br>";
+            return await this.tryGraphWithCallbackToken(
+              output,
+              tokenResult.token!,
+            );
+          }
+          return false;
+        }
+      } catch (fetchError) {
+        output.innerHTML += `❌ REST API request failed: ${(fetchError as Error).message}<br>`;
+
+        if ((fetchError as Error).message.includes("Failed to fetch")) {
+          output.innerHTML +=
+            "ℹ️ Network request blocked - CORS or network policy issue<br>";
+          output.innerHTML +=
+            "ℹ️ Try running in Outlook on the web (OWA) which may have fewer restrictions<br>";
+        }
+        return false;
+      }
+    } catch (error) {
+      output.innerHTML += `❌ Callback token test failed: ${(error as Error).message}<br>`;
+      return false;
+    }
+  }
+
+  /**
+   * Try using callback token with Microsoft Graph endpoint
+   */
+  private async tryGraphWithCallbackToken(
+    output: HTMLElement,
+    token: string,
+  ): Promise<boolean> {
+    try {
+      const graphUrl =
+        "https://graph.microsoft.com/v1.0/me/mailFolders/sentItems/messages?$top=3&$select=subject,sentDateTime,toRecipients";
+
+      const response = await fetch(graphUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        output.innerHTML += "✅ Microsoft Graph API call successful!<br>";
+
+        if (data.value && data.value.length > 0) {
+          output.innerHTML += "&nbsp;&nbsp;Recent sent emails:<br>";
+          data.value.forEach((email: any, index: number) => {
+            const sentDate = email.sentDateTime
+              ? new Date(email.sentDateTime).toLocaleDateString()
+              : "Unknown";
+            output.innerHTML += `&nbsp;&nbsp;&nbsp;&nbsp;${index + 1}. ${email.subject || "(No subject)"} (${sentDate})<br>`;
+          });
+
+          output.innerHTML +=
+            "<br>🎉 <strong style='color: green;'>SUCCESS! Graph API with callback token works!</strong><br>";
+          return true;
+        }
+        return true;
+      } else {
+        const errorText = await response.text();
+        output.innerHTML += `❌ Graph API call failed: ${response.status}<br>`;
+        output.innerHTML += `&nbsp;&nbsp;${errorText.substring(0, 150)}<br>`;
+
+        if (response.status === 401) {
+          output.innerHTML +=
+            "ℹ️ Callback tokens typically can't access Microsoft Graph directly<br>";
+          output.innerHTML +=
+            "ℹ️ They work with Outlook REST API (outlook.office.com) instead<br>";
+        }
+        return false;
+      }
+    } catch (error) {
+      output.innerHTML += `❌ Graph API test failed: ${(error as Error).message}<br>`;
+      return false;
     }
   }
 

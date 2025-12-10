@@ -125,24 +125,28 @@ describe("XmlParsingService", () => {
                     <m:ResponseCode>NoError</m:ResponseCode>
                     <m:Conversation>
                         <t:ConversationId Id="test-conv"/>
-                        <t:Items>
-                            <t:Message>
-                                <t:ItemId Id="msg1" ChangeKey="ck1"/>
-                                <t:Subject>Original Message</t:Subject>
-                                <t:DateTimeSent>2024-01-15T09:00:00Z</t:DateTimeSent>
-                                <t:Body BodyType="Text">First message</t:Body>
-                                <t:From>
-                                    <t:Mailbox>
-                                        <t:EmailAddress>user@company.com</t:EmailAddress>
-                                    </t:Mailbox>
-                                </t:From>
-                                <t:ToRecipients>
-                                    <t:Mailbox>
-                                        <t:EmailAddress>recipient@example.com</t:EmailAddress>
-                                    </t:Mailbox>
-                                </t:ToRecipients>
-                            </t:Message>
-                        </t:Items>
+                        <t:ConversationNodes>
+                            <t:ConversationNode>
+                                <t:Items>
+                                    <t:Message>
+                                        <t:ItemId Id="msg1" ChangeKey="ck1"/>
+                                        <t:Subject>Original Message</t:Subject>
+                                        <t:DateTimeSent>2024-01-15T09:00:00Z</t:DateTimeSent>
+                                        <t:Body BodyType="Text">First message</t:Body>
+                                        <t:From>
+                                            <t:Mailbox>
+                                                <t:EmailAddress>user@company.com</t:EmailAddress>
+                                            </t:Mailbox>
+                                        </t:From>
+                                        <t:ToRecipients>
+                                            <t:Mailbox>
+                                                <t:EmailAddress>recipient@example.com</t:EmailAddress>
+                                            </t:Mailbox>
+                                        </t:ToRecipients>
+                                    </t:Message>
+                                </t:Items>
+                            </t:ConversationNode>
+                        </t:ConversationNodes>
                     </m:Conversation>
                 </m:GetConversationItemsResponseMessage>
             </m:ResponseMessages>
@@ -152,7 +156,7 @@ describe("XmlParsingService", () => {
 
     it("should parse conversation response correctly", () => {
       const currentUserEmail = "user@company.com";
-      const threadMessages = xmlParsingService.parseConversationResponse(
+      const threadMessages = xmlParsingService.parseGetConversationItemsResponse(
         conversationResponse,
         currentUserEmail,
       );
