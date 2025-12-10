@@ -2435,7 +2435,7 @@ export class EmailAnalysisService {
         this.logDebug(`[DEBUG] Found conversation ID: ${conversationId}`);
         return conversationId;
       }
-      console.log(
+      this.logDebug(
         "[DEBUG] No conversation ID found in response (namespace-agnostic search)",
       );
       return null;
